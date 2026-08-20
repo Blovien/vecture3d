@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-latest
+            gradle: ./gradlew
+          - name: Windows x64
+            os: windows-latest
+            gradle: ./gradlew.bat
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Configure MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle 9.5.1 and validate wrapper
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: wrapper
+          validate-wrappers: true
+          cache-provider: basic
+
+      - name: Verify native tools
+        run: |
+          cmake --version
+          ninja --version
+
+      - name: Verify ABI manifest
+        run: ${{ matrix.gradle }} checkAbiManifest --console=plain
+
+      - name: Configure native build
+        run: cmake --preset v3-release --fresh
+
+      - name: Build native library and tests
+        run: cmake --build --preset v3-release --parallel 2
+
+      - name: Run native CTest suite
+        run: ctest --preset v3-release
+
+      - name: Run Java tests
+        run: ${{ matrix.gradle }} :ffi-java:test --console=plain
+
+      - name: Verify published consumer without Jextract
+        run: ${{ matrix.gradle }} :ffi-java:verifyPublishedConsumer --console=plain
+
+      - name: Upload parity artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vecture3d-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            build/v3-release/bin/*vecture3d*
+            ffi-java/build/libs/vecture3d-ffi-*.jar
+            ffi-java/build/test-results/**
