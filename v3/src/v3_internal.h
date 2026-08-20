@@ -46,4 +46,18 @@ v3_status v3_world_replace_box_bodies_internal( v3_world* world, const v3_body_h
 void v3_world_destroy_internal( v3_world* world );
 uint32_t v3_active_world_count_internal( void );
 
+typedef enum v3_test_fault
+{
+	V3_TEST_FAULT_NONE,
+	V3_TEST_FAULT_WORLD_CALLOC,
+	V3_TEST_FAULT_BODY_ENTRIES_REALLOC,
+	V3_TEST_FAULT_PENDING_CALLOC,
+	V3_TEST_FAULT_CREATE_BODY,
+	V3_TEST_FAULT_CREATE_SHAPE,
+} v3_test_fault;
+
+#if defined( V3_TESTING )
+void v3_test_fail_after( v3_test_fault fault, uint32_t successful_calls_before_failure );
+#endif
+
 #endif

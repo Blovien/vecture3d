@@ -20,9 +20,89 @@ typedef struct v3_pending_body
 // TODO: prolly just enfore double precision inside box3d part
 _Static_assert( sizeof( b3Pos ) == 24, "V3 and Box3D must share double-precision world positions" );
 
+#if defined( V3_TESTING )
+static struct
+{
+	v3_test_fault fault;
+	uint32_t successful_calls_before_failure;
+} v3_test_fault_state;
+
+void v3_test_fail_after( v3_test_fault fault, uint32_t successful_calls_before_failure )
+{
+	v3_test_fault_state.fault = fault;
+	v3_test_fault_state.successful_calls_before_failure = successful_calls_before_failure;
+}
+
+static bool v3_test_should_fail( v3_test_fault fault )
+{
+	if ( v3_test_fault_state.fault != fault )
+	{
+		return false;
+	}
+
+	if ( v3_test_fault_state.successful_calls_before_failure > 0 )
+	{
+		v3_test_fault_state.successful_calls_before_failure -= 1;
+		return false;
+	}
+
+	v3_test_fault_state.fault = V3_TEST_FAULT_NONE;
+	return true;
+}
+#endif
+
+static void* v3_calloc( v3_test_fault fault, size_t count, size_t size )
+{
+#if defined( V3_TESTING )
+	if ( v3_test_should_fail( fault ) )
+	{
+		return NULL;
+	}
+#else
+	(void)fault;
+#endif
+	return calloc( count, size );
+}
+
+static void* v3_realloc( v3_test_fault fault, void* memory, size_t size )
+{
+#if defined( V3_TESTING )
+	if ( v3_test_should_fail( fault ) )
+	{
+		return NULL;
+	}
+#else
+	(void)fault;
+#endif
+	return realloc( memory, size );
+}
+
+static b3BodyId v3_create_body( b3WorldId world_id, const b3BodyDef* definition )
+{
+#if defined( V3_TESTING )
+	if ( v3_test_should_fail( V3_TEST_FAULT_CREATE_BODY ) )
+	{
+		return b3_nullBodyId;
+	}
+#endif
+	return b3CreateBody( world_id, definition );
+}
+
+static b3ShapeId v3_create_hull_shape( b3BodyId body_id, const b3ShapeDef* definition, const b3HullData* hull )
+{
+#if defined( V3_TESTING )
+	if ( v3_test_should_fail( V3_TEST_FAULT_CREATE_SHAPE ) )
+	{
+		return b3_nullShapeId;
+	}
+#endif
+	return b3CreateHullShape( body_id, definition, hull );
+}
+
 static uint32_t v3_saturating_add( uint32_t value, uint32_t increment )
 {
-	return UINT32_MAX - value < increment ? UINT32_MAX : value + increment;
+	const uint32_t maximum = (uint32_t)INT32_MAX;
+	return value >= maximum || maximum - value < increment ? maximum : value + increment;
 }
 
 static bool v3_is_normalized_quaternion( float x, float y, float z, float w )
@@ -217,7 +297,8 @@ static v3_status v3_reserve_body_entries( v3_world* world, uint32_t required_cap
 		new_capacity = new_capacity > V3_MAX_LOGICAL_BODY_IDS / 2u ? V3_MAX_LOGICAL_BODY_IDS : new_capacity * 2u;
 	}
 
-	v3_body_entry* entries = realloc( world->body_entries, (size_t)new_capacity * sizeof( *entries ) );
+	v3_body_entry* entries =
+		v3_realloc( V3_TEST_FAULT_BODY_ENTRIES_REALLOC, world->body_entries, (size_t)new_capacity * sizeof( *entries ) );
 	if ( entries == NULL )
 	{
 		return V3_OUT_OF_MEMORY;
@@ -244,7 +325,7 @@ static void v3_destroy_pending_bodies( v3_pending_body* pending, uint32_t create
 
 v3_world* v3_world_create_internal( double gravity_x, double gravity_y, double gravity_z )
 {
-	v3_world* world = calloc( 1, sizeof( *world ) );
+	v3_world* world = v3_calloc( V3_TEST_FAULT_WORLD_CALLOC, 1, sizeof( *world ) );
 	if ( world == NULL )
 	{
 		return NULL;
@@ -306,7 +387,7 @@ v3_status v3_world_replace_box_bodies_internal( v3_world* world, const v3_body_h
 	v3_pending_body* pending = NULL;
 	if ( creation_count > 0 )
 	{
-		pending = calloc( creation_count, sizeof( *pending ) );
+		pending = v3_calloc( V3_TEST_FAULT_PENDING_CALLOC, creation_count, sizeof( *pending ) );
 		if ( pending == NULL )
 		{
 			return V3_OUT_OF_MEMORY;
@@ -331,7 +412,7 @@ v3_status v3_world_replace_box_bodies_internal( v3_world* world, const v3_body_h
 		body_definition.enableSleep = ( command->flags & V3_BODY_ENABLE_SLEEP ) != 0;
 		body_definition.isAwake = ( command->flags & V3_BODY_INITIAL_AWAKE ) != 0;
 
-		b3BodyId body_id = b3CreateBody( world->world_id, &body_definition );
+		b3BodyId body_id = v3_create_body( world->world_id, &body_definition );
 		if ( B3_IS_NULL( body_id ) )
 		{
 			status = V3_NATIVE_FAILURE;
@@ -346,7 +427,7 @@ v3_status v3_world_replace_box_bodies_internal( v3_world* world, const v3_body_h
 																					: V3_DYNAMIC_CATEGORY;
 		shape_definition.filter.maskBits = ( command->flags & V3_BODY_DISABLE_COLLISION ) != 0 ? 0u : V3_ALL_BODY_CATEGORIES;
 		b3BoxHull box = b3MakeBoxHull( command->half_extent_x, command->half_extent_y, command->half_extent_z );
-		b3ShapeId shape_id = b3CreateHullShape( body_id, &shape_definition, &box.base );
+		b3ShapeId shape_id = v3_create_hull_shape( body_id, &shape_definition, &box.base );
 		if ( B3_IS_NULL( shape_id ) )
 		{
 			b3DestroyBody( body_id );
