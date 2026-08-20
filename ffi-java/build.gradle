@@ -14,6 +14,41 @@ tasks.named('test') {
     jvmArgs '--enable-native-access=ALL-UNNAMED'
 }
 
+def nativeLibraryFile = rootProject.file("build/v3-release/bin/${System.mapLibraryName('vecture3d')}")
+def mismatchLibraryFile = layout.buildDirectory.file("native-test/${System.mapLibraryName('vecture3d_mismatch')}")
+
+def configureV3Native = tasks.register('configureV3Native', Exec) {
+    workingDir rootProject.projectDir
+    commandLine 'cmake', '--preset', 'v3-release'
+}
+
+def buildV3Native = tasks.register('buildV3Native', Exec) {
+    dependsOn configureV3Native
+    workingDir rootProject.projectDir
+    commandLine 'cmake', '--build', '--preset', 'v3-release', '--target', 'vecture3d_native', '--parallel', '2'
+}
+
+def buildMismatchNativeFixture = tasks.register('buildMismatchNativeFixture', Exec) {
+    def source = layout.projectDirectory.file('src/test/native/v3_mismatch.c')
+    inputs.file source
+    outputs.file mismatchLibraryFile
+    doFirst {
+        mismatchLibraryFile.get().asFile.parentFile.mkdirs()
+    }
+    commandLine providers.environmentVariable('CC').getOrElse('cc'),
+        '-std=c17', '-Wall', '-Wextra', '-Werror', '-shared', '-fPIC', source.asFile.absolutePath,
+        '-o', mismatchLibraryFile.get().asFile.absolutePath
+}
+
+tasks.named('test') {
+    dependsOn buildV3Native, buildMismatchNativeFixture
+    inputs.file nativeLibraryFile
+    inputs.file mismatchLibraryFile
+    systemProperty 'v3.native.library', nativeLibraryFile.absolutePath
+    systemProperty 'v3.mismatch.library', mismatchLibraryFile.get().asFile.absolutePath
+    systemProperty 'v3.test.classpath', sourceSets.test.runtimeClasspath.asPath
+}
+
 jextract.libraries {
     def v3 = register('v3') {
         header = layout.projectDirectory.file('src/main/public/v3_abi.h')
