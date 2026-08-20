@@ -145,6 +145,7 @@ if(PROJECT_IS_TOP_LEVEL)
 	option(BOX3D_BENCHMARKS "Build the Box3D benchmarks" OFF)
 	option(BOX3D_DOCS "Build the Box3D documentation" OFF)
 	option(BOX3D_UNIT_TESTS "Build the Box3D unit tests" ON)
+	add_subdirectory(v3)
 
 	# Enable this for shader development using sokol-shdc.
 	# This can be a large download, so this is disabled by default.
