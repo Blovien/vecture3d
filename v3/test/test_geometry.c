@@ -47,11 +47,6 @@ static v3_box_body_command make_dynamic_box( uint64_t logical_id, double positio
 	return command;
 }
 
-static v3_body_handle make_handle( uint64_t logical_id, uint32_t generation )
-{
-	return (v3_body_handle){ .logical_id = logical_id, .generation = generation };
-}
-
 static v3_terrain_box make_detail_box( uint64_t feature_id, float center_x, float center_y, float center_z )
 {
 	return (v3_terrain_box){

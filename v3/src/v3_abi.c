@@ -39,7 +39,7 @@ v3_status v3_world_replace_box_bodies( v3_world* world, const v3_body_handle* re
 		return V3_LIMIT_EXCEEDED;
 	}
 
-	return v3_world_replace_box_bodies_geometry_aware_internal( world, removals, removal_count, creations, creation_count );
+	return v3_world_replace_box_bodies_joint_aware_internal( world, removals, removal_count, creations, creation_count );
 }
 
 v3_status v3_world_replace_terrain_sections( v3_world* world, const v3_body_handle* removals, uint32_t removal_count,
@@ -57,6 +57,11 @@ v3_status v3_world_replace_terrain_sections( v3_world* world, const v3_body_hand
 		 voxel_run_count > V3_MAX_VOXEL_RUNS_PER_BATCH || detail_box_count > V3_MAX_TERRAIN_DETAIL_BOXES_PER_BATCH )
 	{
 		return V3_LIMIT_EXCEEDED;
+	}
+	v3_status status = v3_joint_validate_body_removals_internal( world, removals, removal_count );
+	if ( status != V3_OK )
+	{
+		return status;
 	}
 
 	return v3_world_replace_terrain_sections_internal( world, removals, removal_count, sections, section_count, voxel_runs,
@@ -86,9 +91,45 @@ v3_status v3_world_create_voxel_group( v3_world* world, const v3_box_body_comman
 	return v3_world_create_voxel_group_internal( world, command, boxes, box_count, mass_properties );
 }
 
+v3_status v3_world_replace_distance_joints( v3_world* world, const v3_joint_handle* removals, uint32_t removal_count,
+											const v3_distance_joint_command* creations, uint32_t creation_count )
+{
+	if ( world == NULL || ( removal_count > 0 && removals == NULL ) || ( creation_count > 0 && creations == NULL ) )
+	{
+		return V3_INVALID_ARGUMENT;
+	}
+	if ( removal_count > V3_MAX_JOINTS_PER_BATCH || creation_count > V3_MAX_JOINTS_PER_BATCH )
+	{
+		return V3_LIMIT_EXCEEDED;
+	}
+	return v3_world_replace_distance_joints_internal( world, removals, removal_count, creations, creation_count );
+}
+
+v3_status v3_world_step_and_read( v3_world* world, const v3_kinematic_target* targets, uint32_t target_count,
+								  const v3_body_wrench* wrenches, uint32_t wrench_count, const v3_query* queries,
+								  uint32_t query_count, uint32_t fixed_step_count, v3_transform* transforms,
+								  uint32_t transform_capacity, v3_query_result* query_results, uint32_t query_result_capacity,
+								  v3_step_stats* stats )
+{
+	if ( world == NULL || stats == NULL || ( target_count > 0 && targets == NULL ) || ( wrench_count > 0 && wrenches == NULL ) ||
+		 ( query_count > 0 && queries == NULL ) )
+	{
+		return V3_INVALID_ARGUMENT;
+	}
+	if ( target_count > V3_MAX_BODIES_PER_BATCH || wrench_count > V3_MAX_WRENCHES_PER_BATCH ||
+		 query_count > V3_MAX_QUERIES_PER_BATCH || fixed_step_count > V3_MAX_FIXED_STEPS )
+	{
+		return V3_LIMIT_EXCEEDED;
+	}
+	return v3_world_step_and_read_internal( world, targets, target_count, wrenches, wrench_count, queries, query_count,
+											fixed_step_count, transforms, transform_capacity, query_results,
+											query_result_capacity, stats );
+}
+
 void v3_world_destroy( v3_world* world )
 {
 	v3_geometry_destroy_owned_payloads_internal( world );
+	v3_joint_destroy_state_internal( world );
 	v3_world_destroy_internal( world );
 }
 
