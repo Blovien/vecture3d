@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
   "configurePresets": [
     {
@@ -90,6 +90,21 @@
         "CMAKE_CXX_COMPILER": "clang-cl",
         "FETCHCONTENT_BASE_DIR": "${sourceDir}/.fetchcontent-cache/clang-cl"
       }
+    },
+    {
+      "name": "v3-release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/v3-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_SHARED_LIBS": "OFF",
+        "BOX3D_DOUBLE_PRECISION": "ON",
+        "BOX3D_VALIDATE": "ON",
+        "BOX3D_SAMPLES": "ON",
+        "BOX3D_DOCS": "OFF",
+        "BOX3D_BENCHMARKS": "OFF",
+        "BOX3D_UNIT_TESTS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -104,6 +119,8 @@
     { "name": "windows-clang-cl-debug",   "configurePreset": "windows-clang-cl", "configuration": "Debug" },
     { "name": "windows-clang-cl-release", "configurePreset": "windows-clang-cl", "configuration": "Release" },
     { "name": "clang-cl-debug",   "configurePreset": "clang-cl-debug" },
-    { "name": "clang-cl-release", "configurePreset": "clang-cl-release" }
-  ]
+    { "name": "clang-cl-release", "configurePreset": "clang-cl-release" },
+    { "name": "v3-release", "configurePreset": "v3-release" }
+  ],
+  "testPresets": [{"name": "v3-release", "configurePreset": "v3-release", "output": {"outputOnFailure": true}}]
 }
