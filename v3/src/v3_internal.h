@@ -11,7 +11,14 @@
 
 #define V3_MAX_BODIES_PER_BATCH UINT32_C( 4096 )
 #define V3_MAX_LOGICAL_BODY_IDS UINT32_C( 4096 )
+#define V3_MAX_VOXEL_CHILDREN_PER_SECTION UINT32_C( 65534 )
+#define V3_MAX_VOXEL_RUNS_PER_BATCH UINT32_C( 262144 )
+#define V3_MAX_TERRAIN_DETAIL_BOXES_PER_BATCH UINT32_C( 262144 )
+#define V3_VOXEL_SECTION_SIZE UINT32_C( 32 )
+#define V3_VOXEL_RUN_USED_BITS UINT32_C( 0x3fffffff )
+#define V3_MAX_HULL_POINTS UINT32_C( 64 )
 #define V3_MAX_DAMPING 10.0f
+#define V3_DEFAULT_VOXEL_FRICTION 0.7f
 
 #define V3_STATIC_CATEGORY ( UINT64_C( 1 ) << 0u )
 #define V3_KINEMATIC_CATEGORY ( UINT64_C( 1 ) << 1u )
@@ -24,7 +31,10 @@ typedef struct v3_body_entry
 	uint32_t generation;
 	b3BodyId body_id;
 	b3ShapeId shape_id;
+	b3CompoundData* owned_voxel;
+	b3MassData mass_data;
 	uint32_t kind;
+	bool has_explicit_mass_data;
 	bool is_active;
 } v3_body_entry;
 
@@ -43,6 +53,18 @@ struct v3_world
 v3_world* v3_world_create_internal( double gravity_x, double gravity_y, double gravity_z );
 v3_status v3_world_replace_box_bodies_internal( v3_world* world, const v3_body_handle* removals, uint32_t removal_count,
 												const v3_box_body_command* creations, uint32_t creation_count );
+v3_status v3_world_replace_box_bodies_geometry_aware_internal( v3_world* world, const v3_body_handle* removals,
+															   uint32_t removal_count, const v3_box_body_command* creations,
+															   uint32_t creation_count );
+v3_status v3_world_replace_terrain_sections_internal( v3_world* world, const v3_body_handle* removals, uint32_t removal_count,
+													  const v3_terrain_section_command* sections, uint32_t section_count,
+													  const v3_voxel_run* voxel_runs, uint32_t voxel_run_count,
+													  const v3_terrain_box* detail_boxes, uint32_t detail_box_count );
+v3_status v3_world_create_hull_body_internal( v3_world* world, const v3_box_body_command* command, const float* point_xyz,
+											  uint32_t point_count );
+v3_status v3_world_create_voxel_group_internal( v3_world* world, const v3_box_body_command* command, const v3_terrain_box* boxes,
+												uint32_t box_count, const v3_mass_properties* mass_properties );
+void v3_geometry_destroy_owned_payloads_internal( v3_world* world );
 void v3_world_destroy_internal( v3_world* world );
 uint32_t v3_active_world_count_internal( void );
 
