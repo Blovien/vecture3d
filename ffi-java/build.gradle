@@ -93,24 +93,25 @@ publishing {
 
 def consumerDirectory = layout.projectDirectory.dir('src/test/consumer')
 
-tasks.register('verifyPublishedConsumer', Exec) {
+tasks.register('verifyPublishedConsumer', Exec) { Exec consumerVerification ->
     group = 'verification'
     description = 'Publishes and tests a clean Java 25 consumer without applying Jextract.'
     dependsOn buildV3Native, 'publishMavenJavaPublicationToVerificationRepository'
     workingDir rootProject.projectDir
-    doFirst {
+    consumerVerification.doFirst {
         List<String> arguments = [
             '--no-daemon',
             '--project-dir', consumerDirectory.asFile.absolutePath,
             "-Pv3Repository=${layout.buildDirectory.dir('test-repository').get().asFile.absolutePath}",
             "-Pv3NativeLibrary=${nativeLibraryFile.absolutePath}",
             'test',
+            '--rerun-tasks',
             '--console=plain'
         ]
         if (System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('windows')) {
-            commandLine(['cmd', '/c', rootProject.file('gradlew.bat').absolutePath] + arguments)
+            consumerVerification.commandLine(['cmd', '/c', rootProject.file('gradlew.bat').absolutePath] + arguments)
         } else {
-            commandLine([rootProject.file('gradlew').absolutePath] + arguments)
+            consumerVerification.commandLine([rootProject.file('gradlew').absolutePath] + arguments)
         }
     }
 }

@@ -3,7 +3,12 @@ plugins {
 }
 
 repositories {
-    maven { url = uri(providers.gradleProperty('v3Repository').get()) }
+    maven {
+        url = uri(providers.gradleProperty('v3Repository').get())
+        metadataSources { sources ->
+            sources.mavenPom()
+        }
+    }
     mavenCentral()
 }
 
@@ -17,8 +22,8 @@ java {
     toolchain.languageVersion = JavaLanguageVersion.of(25)
 }
 
-test {
-    useJUnitPlatform()
-    jvmArgs '--enable-native-access=ALL-UNNAMED'
-    systemProperty 'v3.native.library', providers.gradleProperty('v3NativeLibrary').get()
+tasks.named('test', Test) { Test consumerTest ->
+    consumerTest.useJUnitPlatform()
+    consumerTest.jvmArgs '--enable-native-access=ALL-UNNAMED'
+    consumerTest.systemProperty 'v3.native.library', providers.gradleProperty('v3NativeLibrary').get()
 }
