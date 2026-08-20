@@ -565,6 +565,13 @@ static void b3SerShapes( b3RecBuffer* buf, b3World* world, b3Recording* rec )
 				b3SnapW_U32( buf, gid );
 				break;
 			}
+			case b3_voxelShape:
+			{
+				b3SnapW_I32( buf, (int)b3_voxelShape );
+				uint32_t gid = b3RecInternCompound( rec, src->voxel );
+				b3SnapW_U32( buf, gid );
+				break;
+			}
 			default:
 				// A live shape must have a known geometry type. Fail loudly rather than emit a shape
 				// with no geometry that would silently lose its collision on restore.
@@ -752,6 +759,24 @@ static void b3DesShapes( b3SnapReader* r, b3World* world, b3RecReader* rdr )
 					b3ConvertBytesToCompound( (uint8_t*)slot->live, slot->byteCount );
 				}
 				dst->compound = (const b3CompoundData*)slot->live;
+				break;
+			}
+			case b3_voxelShape:
+			{
+				uint32_t gid = b3SnapR_U32( r );
+				if ( !r->ok || rdr == NULL || gid >= (uint32_t)rdr->slotCount )
+				{
+					r->ok = false;
+					break;
+				}
+				b3RegistrySlot* slot = rdr->slots + gid;
+				if ( slot->live == NULL )
+				{
+					slot->live = b3Alloc( (size_t)slot->byteCount );
+					memcpy( slot->live, slot->bytes, (size_t)slot->byteCount );
+					b3ConvertBytesToCompound( (uint8_t*)slot->live, slot->byteCount );
+				}
+				dst->voxel = (const b3CompoundData*)slot->live;
 				break;
 			}
 			default:

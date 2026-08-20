@@ -26,6 +26,7 @@ set(BOX3D_TEST_FILES
     test_sat.c
     test_shape.c
     test_table.c
+    test_v3_voxel.c
     test_world.c
 )
 

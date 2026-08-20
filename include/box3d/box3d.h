@@ -833,6 +833,11 @@ B3_API b3ShapeId b3CreateHeightFieldShape( b3BodyId bodyId, const b3ShapeDef* de
 /// Runtime compounds can be dynamic and/or kinematic.
 B3_API b3ShapeId b3CreateBakedCompoundShape( b3BodyId bodyId, b3ShapeDef* def, const b3CompoundData* compound );
 
+/// Create an immutable voxel shape from convex compound children.
+/// Voxel shapes are only allowed on static bodies and cannot be sensors.
+/// The voxel data is borrowed and must remain valid until the shape is destroyed.
+B3_API b3ShapeId b3CreateVoxelShape( b3BodyId bodyId, const b3ShapeDef* def, const b3CompoundData* voxel );
+
 /// Destroy a shape. You may defer the body mass update which can improve performance if several shapes on a
 ///	body are destroyed at once.
 ///	@see b3Body_ApplyMassFromShapes

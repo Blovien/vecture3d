@@ -127,6 +127,21 @@ void b3BroadPhase_EnlargeProxy( b3BroadPhase* bp, int proxyKey, b3AABB aabb )
 	b3BufferMove( bp, proxyKey );
 }
 
+static bool b3BufferDynamicOverlapCallback( int proxyId, uint64_t userData, void* context )
+{
+	B3_UNUSED( userData );
+	b3BroadPhase* bp = context;
+	b3BufferMove( bp, B3_PROXY_KEY( proxyId, b3_dynamicBody ) );
+	return true;
+}
+
+void b3BroadPhase_BufferDynamicOverlaps( b3BroadPhase* bp, b3AABB aabb )
+{
+	// A voxel shape cannot be the moved query shape because its child tree is descended from the other shape.
+	b3DynamicTree_Query( bp->trees + b3_dynamicBody, aabb, B3_DEFAULT_MASK_BITS, false,
+						 b3BufferDynamicOverlapCallback, bp );
+}
+
 typedef struct b3MovePair
 {
 	int shapeIndexA;
@@ -174,7 +189,7 @@ static bool b3PairQueryCallback( int proxyId, uint64_t userData, void* context )
 		}
 
 		b3Shape* shape = b3Array_Get( world->shapes, shapeIndex );
-		if ( shape->type == b3_compoundShape )
+		if ( shape->type == b3_compoundShape || shape->type == b3_voxelShape )
 		{
 			// Query bounds are float world space, so the demoted transform is the matching float frame
 			b3Transform compoundTransform = b3ToRelativeTransform( b3GetBodyTransform( world, shape->bodyId ), b3Pos_zero );
@@ -184,7 +199,9 @@ static bool b3PairQueryCallback( int proxyId, uint64_t userData, void* context )
 			queryContext->compoundShapeIndex = shapeIndex;
 			queryContext->compoundProxyId = proxyId;
 
-			b3DynamicTree_Query( &shape->compound->tree, localAABB, B3_DEFAULT_MASK_BITS, false, b3PairQueryCallback, context );
+			const b3CompoundData* compound =
+				shape->type == b3_compoundShape ? shape->compound : shape->voxel;
+			b3DynamicTree_Query( &compound->tree, localAABB, B3_DEFAULT_MASK_BITS, false, b3PairQueryCallback, context );
 			queryContext->compoundShapeIndex = B3_NULL_INDEX;
 			queryContext->compoundProxyId = B3_NULL_INDEX;
 			return true;
@@ -307,10 +324,10 @@ static bool b3PairQueryCallback( int proxyId, uint64_t userData, void* context )
 	}
 	else
 	{
-		// todo experimenting with ignoring this pair if we ran out of space
-		return true;
-		// pair = (b3MovePair*)b3Alloc( sizeof( b3MovePair ) );
-		// pair->heap = true;
+		// Dense voxel sections can overlap far more than the stack estimate. Dropping these pairs would
+		// make collision depend on child ordering. For now we should we keep them compared to Box3D
+		pair = (b3MovePair*)b3Alloc( sizeof( b3MovePair ) );
+		pair->heap = true;
 	}
 
 	pair->shapeIndexA = shapeIdA;
@@ -357,7 +374,8 @@ static void b3FindPairsTask( int startIndex, int endIndex, int workerIndex, void
 		queryContext.aabb = fatAABB;
 
 		// Compound shape collision invocation is not supported
-		B3_VALIDATE( world->shapes.data[queryContext.queryShapeIndex].type != b3_compoundShape );
+		B3_VALIDATE( world->shapes.data[queryContext.queryShapeIndex].type != b3_compoundShape &&
+					 world->shapes.data[queryContext.queryShapeIndex].type != b3_voxelShape );
 
 		// Query trees. Only dynamic proxies collide with kinematic and static proxies.
 		// Using B3_DEFAULT_MASK_BITS so that b3Filter::groupIndex works.
@@ -403,6 +421,7 @@ void b3UpdateBroadPhasePairs( b3World* world )
 
 	if ( moveCount == 0 )
 	{
+		world->heapMovePairCount = 0;
 		return;
 	}
 
@@ -424,6 +443,7 @@ void b3UpdateBroadPhasePairs( b3World* world )
 
 	int minRange = 64;
 	b3ParallelFor( world, b3FindPairsTask, moveCount, minRange, world, "pairs" );
+	world->heapMovePairCount = b3MaxInt( 0, b3AtomicLoadInt( &bp->movePairIndex ) - bp->movePairCapacity );
 
 	b3TracyCZoneNC( create_contacts, "Create Contacts", b3_colorCoral, true );
 

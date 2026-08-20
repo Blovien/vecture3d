@@ -240,6 +240,7 @@ typedef struct b3World
 	uint16_t generation;
 
 	b3Profile profile;
+	int heapMovePairCount;
 	int satCallCount;
 	int satCacheHitCount;
 	int manifoldCounts[B3_CONTACT_MANIFOLD_COUNT_BUCKETS];

@@ -450,6 +450,9 @@ typedef enum b3ShapeType
 	/// A sphere with an offset
 	b3_sphereShape,
 
+	/// A static voxel shape backed by immutable convex children
+	b3_voxelShape,
+
 	/// The number of shape types
 	b3_shapeTypeCount
 } b3ShapeType;
@@ -572,6 +575,7 @@ typedef struct b3Counters
 	int arenaCapacity;
 	int staticTreeHeight;
 	int treeHeight;
+	int heapMovePairCount;
 	int satCallCount;
 	int satCacheHitCount;
 	int byteCount;
@@ -2962,6 +2966,7 @@ typedef struct b3DebugShape
 		const b3Capsule* capsule;			  ///< Capsule shape.
 		const b3CompoundData* compound;		  ///< Compound shape.
 		const b3HeightFieldData* heightField; ///< Height-field shape.
+		const b3CompoundData* voxel;			  ///< Voxel shape.
 		const b3HullData* hull;				  ///< Convex hull shape.
 		const b3Mesh* mesh;					  ///< Mesh shape with scale.
 		const b3Sphere* sphere;				  ///< Sphere shape.

@@ -60,6 +60,7 @@ static float b3ComputeShapeMargin( b3Shape* shape )
 		case b3_meshShape:
 		case b3_heightShape:
 		case b3_compoundShape:
+		case b3_voxelShape:
 		{
 			// Static-only shapes: broadphase uses speculative distance for static
 			// proxies, so the per-shape margin is never consumed in practice.
@@ -126,6 +127,13 @@ static b3Shape* b3CreateShapeInternal( b3World* world, b3Body* body, b3WorldTran
 			shape->compound = (b3CompoundData*)geometry;
 			break;
 
+		case b3_voxelShape:
+			// Voxel shapes are immutable, borrowed, static, and never sensors.
+			B3_ASSERT( body->type == b3_staticBody );
+			B3_ASSERT( def->isSensor == false );
+			shape->voxel = (const b3CompoundData*)geometry;
+			break;
+
 		case b3_sphereShape:
 			shape->sphere = *(b3Sphere*)geometry;
 			break;
@@ -190,14 +198,16 @@ static b3Shape* b3CreateShapeInternal( b3World* world, b3Body* body, b3WorldTran
 	shape->nameId = b3AddName( &world->names, def->name );
 	shape->generation += 1;
 
-	if ( shape->type == b3_compoundShape )
+	if ( shape->type == b3_compoundShape || shape->type == b3_voxelShape )
 	{
 		// Own a copy of the compound materials so every shape frees its array the same way. Compounds
 		// are few, so the copy is cheap and avoids aliasing the geometry blob.
-		int materialCount = shape->compound->materialCount;
+		const b3CompoundData* compound =
+			shape->type == b3_compoundShape ? shape->compound : shape->voxel;
+		int materialCount = compound->materialCount;
 		shape->materialCount = materialCount;
 		shape->materials = b3Alloc( materialCount * sizeof( b3SurfaceMaterial ) );
-		memcpy( shape->materials, b3GetCompoundMaterials( shape->compound ), materialCount * sizeof( b3SurfaceMaterial ) );
+		memcpy( shape->materials, b3GetCompoundMaterials( compound ), materialCount * sizeof( b3SurfaceMaterial ) );
 	}
 	else if ( def->materialCount > 1 && def->materials != NULL )
 	{
@@ -217,8 +227,13 @@ static b3Shape* b3CreateShapeInternal( b3World* world, b3Body* body, b3WorldTran
 	if ( body->setIndex != b3_disabledSet )
 	{
 		b3BodyType proxyType = body->type;
-		bool forcePairCreation = def->invokeContactCreation && shape->type != b3_compoundShape;
+		bool forcePairCreation =
+			def->invokeContactCreation && shape->type != b3_compoundShape && shape->type != b3_voxelShape;
 		b3CreateShapeProxy( shape, &world->broadPhase, proxyType, bodyTransform, forcePairCreation );
+		if ( def->invokeContactCreation && shape->type == b3_voxelShape )
+		{
+			b3BroadPhase_BufferDynamicOverlaps( &world->broadPhase, shape->fatAABB );
+		}
 	}
 
 	// Add to shape doubly linked list
@@ -273,9 +288,10 @@ static b3ShapeId b3CreateShape( b3BodyId bodyId, const b3ShapeDef* def, const vo
 	}
 
 	b3Body* body = b3GetBodyFullId( world, bodyId );
-	if ( body->type != b3_staticBody && ( shapeType == b3_compoundShape || shapeType == b3_heightShape ) )
+	if ( body->type != b3_staticBody &&
+		 ( shapeType == b3_compoundShape || shapeType == b3_heightShape || shapeType == b3_voxelShape ) )
 	{
-		// Compound and height shapes must be on static bodies.
+		// Concave container shapes must be on static bodies.
 		return b3_nullShapeId;
 	}
 
@@ -476,6 +492,16 @@ b3ShapeId b3CreateBakedCompoundShape( b3BodyId bodyId, b3ShapeDef* def, const b3
 	return shapeId;
 }
 
+b3ShapeId b3CreateVoxelShape( b3BodyId bodyId, const b3ShapeDef* def, const b3CompoundData* voxel )
+{
+	if ( voxel == NULL || def == NULL || def->isSensor || voxel->capsuleCount != 0 || voxel->meshCount != 0 ||
+		 voxel->sphereCount != 0 || voxel->hullCount <= 0 )
+	{
+		return b3_nullShapeId;
+	}
+	return b3CreateShape( bodyId, def, voxel, b3_voxelShape, b3Transform_identity, b3Vec3_one, false );
+}
+
 // Destroy a shape on a body. This doesn't need to be called when destroying a body.
 static void b3DestroyShapeInternal( b3World* world, b3Shape* shape, b3Body* body, bool wakeBodies )
 {
@@ -607,6 +633,9 @@ b3AABB b3ComputeShapeAABB( const b3Shape* shape, b3Transform transform )
 		case b3_compoundShape:
 			return b3ComputeCompoundAABB( shape->compound, transform );
 
+		case b3_voxelShape:
+			return b3ComputeCompoundAABB( shape->voxel, transform );
+
 		case b3_heightShape:
 			return b3ComputeHeightFieldAABB( shape->heightField, transform );
 
@@ -680,6 +709,11 @@ b3Vec3 b3GetShapeCentroid( const b3Shape* shape )
 		case b3_compoundShape:
 		{
 			b3AABB aabb = b3ComputeCompoundAABB( shape->compound, b3Transform_identity );
+			return b3AABB_Center( aabb );
+		}
+		case b3_voxelShape:
+		{
+			b3AABB aabb = b3ComputeCompoundAABB( shape->voxel, b3Transform_identity );
 			return b3AABB_Center( aabb );
 		}
 		case b3_sphereShape:
@@ -794,6 +828,17 @@ b3ShapeExtent b3ComputeShapeExtent( const b3Shape* shape, b3Vec3 localCenter )
 		}
 		break;
 
+		case b3_voxelShape:
+		{
+			b3AABB aabb = b3ComputeCompoundAABB( shape->voxel, b3Transform_identity );
+			float r1 = b3Length( b3Sub( aabb.lowerBound, localCenter ) );
+			float r2 = b3Length( b3Sub( aabb.upperBound, localCenter ) );
+			extent.minExtent = b3MinFloat( r1, r2 );
+			b3Vec3 p = b3FarthestPointOnAABB( aabb, localCenter );
+			extent.maxExtent = b3Abs( b3Sub( p, localCenter ) );
+		}
+		break;
+
 		case b3_sphereShape:
 		{
 			float radius = shape->sphere.radius;
@@ -842,6 +887,9 @@ b3CastOutput b3RayCastShape( const b3Shape* shape, b3Transform transform, const 
 		case b3_compoundShape:
 			output = b3RayCastCompound( shape->compound, &localInput );
 			break;
+		case b3_voxelShape:
+			output = b3RayCastCompound( shape->voxel, &localInput );
+			break;
 		case b3_sphereShape:
 			output = b3RayCastSphere( &shape->sphere, &localInput );
 			break;
@@ -888,6 +936,10 @@ b3CastOutput b3ShapeCastShape( const b3Shape* shape, b3Transform transform, cons
 			output = b3ShapeCastCompound( shape->compound, &localInput );
 			break;
 
+		case b3_voxelShape:
+			output = b3ShapeCastCompound( shape->voxel, &localInput );
+			break;
+
 		case b3_heightShape:
 			output = b3ShapeCastHeightField( shape->heightField, &localInput );
 			break;
@@ -922,6 +974,9 @@ bool b3OverlapShape( const b3Shape* shape, b3Transform transform, const b3ShapeP
 
 		case b3_compoundShape:
 			return b3OverlapCompound( shape->compound, transform, proxy );
+
+		case b3_voxelShape:
+			return b3OverlapCompound( shape->voxel, transform, proxy );
 
 		case b3_heightShape:
 			return b3OverlapHeightField( shape->heightField, transform, proxy );
@@ -989,6 +1044,10 @@ int b3CollideMover( b3PlaneResult* planes, int planeCapacity, const b3Shape* sha
 
 		case b3_compoundShape:
 			planeCount = b3CollideMoverAndCompound( planes, planeCapacity, shape->compound, &localMover );
+			break;
+
+		case b3_voxelShape:
+			planeCount = b3CollideMoverAndCompound( planes, planeCapacity, shape->voxel, &localMover );
 			break;
 
 		case b3_sphereShape:
@@ -1263,7 +1322,7 @@ void b3Shape_SetFriction( b3ShapeId shapeId, float friction )
 	b3World* world = b3GetWorld( shapeId.world0 );
 	B3_REC( world, ShapeSetFriction, shapeId, friction );
 	b3Shape* shape = b3GetShape( world, shapeId );
-	B3_ASSERT( shape->type != b3_compoundShape );
+	B3_ASSERT( shape->type != b3_compoundShape && shape->type != b3_voxelShape );
 	b3GetShapeMaterials( shape )[0].friction = friction;
 }
 
@@ -1280,7 +1339,7 @@ void b3Shape_SetRestitution( b3ShapeId shapeId, float restitution )
 	b3World* world = b3GetWorld( shapeId.world0 );
 	B3_REC( world, ShapeSetRestitution, shapeId, restitution );
 	b3Shape* shape = b3GetShape( world, shapeId );
-	B3_ASSERT( shape->type != b3_compoundShape );
+	B3_ASSERT( shape->type != b3_compoundShape && shape->type != b3_voxelShape );
 	b3GetShapeMaterials( shape )[0].restitution = restitution;
 }
 
@@ -1301,7 +1360,7 @@ void b3Shape_SetSurfaceMaterial( b3ShapeId shapeId, b3SurfaceMaterial surfaceMat
 	b3World* world = b3GetWorld( shapeId.world0 );
 	B3_REC( world, ShapeSetSurfaceMaterial, shapeId, surfaceMaterial );
 	b3Shape* shape = b3GetShape( world, shapeId );
-	B3_ASSERT( shape->type != b3_compoundShape );
+	B3_ASSERT( shape->type != b3_compoundShape && shape->type != b3_voxelShape );
 	b3GetShapeMaterials( shape )[0] = surfaceMaterial;
 }
 
@@ -1330,7 +1389,7 @@ void b3Shape_SetMeshMaterial( b3ShapeId shapeId, b3SurfaceMaterial surfaceMateri
 	b3Shape* shape = b3GetShape( world, shapeId );
 
 	B3_ASSERT( 0 <= index && index < shape->materialCount );
-	B3_ASSERT( shape->type != b3_compoundShape );
+	B3_ASSERT( shape->type != b3_compoundShape && shape->type != b3_voxelShape );
 
 	B3_REC( world, ShapeSetMeshMaterial, shapeId, surfaceMaterial, index );
 	b3GetShapeMaterials( shape )[index] = surfaceMaterial;
@@ -2273,7 +2332,7 @@ b3TOIOutput b3ShapeTimeOfImpact( b3Shape* shapeA, b3Shape* shapeB, b3Sweep* swee
 	bool isSensor = shapeA->sensorIndex != B3_NULL_INDEX;
 
 	b3ShapeType typeA = shapeA->type;
-	if ( typeA == b3_compoundShape )
+	if ( typeA == b3_compoundShape || typeA == b3_voxelShape )
 	{
 		// todo implement b3CompoundTimeOfImpact
 		b3CompoundImpactContext context = { 0 };
@@ -2299,7 +2358,9 @@ b3TOIOutput b3ShapeTimeOfImpact( b3Shape* shapeA, b3Shape* shapeB, b3Sweep* swee
 		b3AABB localBounds = b3AABB_Transform( b3InvertTransform( context.compoundTransform ), bounds );
 		context.localSweepBoundsB = localBounds;
 
-		b3QueryCompound( shapeA->compound, localBounds, b3CompoundTimeOfImpactFcn, &context );
+		const b3CompoundData* compound =
+			typeA == b3_compoundShape ? shapeA->compound : shapeA->voxel;
+		b3QueryCompound( compound, localBounds, b3CompoundTimeOfImpactFcn, &context );
 
 		return context.toiOutput;
 	}
@@ -2369,7 +2430,8 @@ b3TOIOutput b3ShapeTimeOfImpact( b3Shape* shapeA, b3Shape* shapeB, b3Sweep* swee
 		return context.toiOutput;
 	}
 
-	B3_ASSERT( shapeB->type != b3_compoundShape && shapeB->type != b3_meshShape && shapeB->type != b3_heightShape );
+	B3_ASSERT( shapeB->type != b3_compoundShape && shapeB->type != b3_voxelShape &&
+			   shapeB->type != b3_meshShape && shapeB->type != b3_heightShape );
 
 	b3TOIInput input;
 	input.proxyA = b3MakeShapeProxy( shapeA );
@@ -2425,9 +2487,10 @@ uint64_t b3GetShapeUserMaterialId( const b3Shape* shape, int childIndex, int tri
 	{
 		materialIndex = b3GetHeightFieldMaterial( shape->heightField, triangleIndex );
 	}
-	else if ( shape->type == b3_compoundShape )
+	else if ( shape->type == b3_compoundShape || shape->type == b3_voxelShape )
 	{
-		b3ChildShape child = b3GetCompoundChild( shape->compound, childIndex );
+		const b3CompoundData* compound = shape->type == b3_compoundShape ? shape->compound : shape->voxel;
+		b3ChildShape child = b3GetCompoundChild( compound, childIndex );
 		if ( child.type == b3_meshShape )
 		{
 			const uint8_t* indices = b3GetMeshMaterialIndices( child.mesh.data );
