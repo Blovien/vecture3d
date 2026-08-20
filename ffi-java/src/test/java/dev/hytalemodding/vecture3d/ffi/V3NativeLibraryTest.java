@@ -1,5 +1,6 @@
 package dev.hytalemodding.vecture3d.ffi;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFileAttributeView;

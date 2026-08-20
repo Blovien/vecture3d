@@ -11,7 +11,6 @@ import dev.hytalemodding.vecture3d.ffi.generated.V3Abi;
 
 public final class V3NativeLibrary {
     private static final String PROCESS_PATH_KEY = "dev.hytalemodding.vecture3d.ffi.native.path";
-    private static final String PROCESS_LOADER_KEY = "dev.hytalemodding.vecture3d.ffi.native.loader";
 
     private static V3NativeLibrary loadedLibrary;
 
@@ -24,27 +23,21 @@ public final class V3NativeLibrary {
     public static V3NativeLibrary load(Path path) {
         Path realPath = validatePath(path);
         Properties processState = System.getProperties();
-        ClassLoader definingLoader = V3NativeLibrary.class.getClassLoader();
         synchronized (processState) {
-            Object admittedPath = processState.get(PROCESS_PATH_KEY);
-            Object admittedLoader = processState.get(PROCESS_LOADER_KEY);
-            if (admittedPath != null || admittedLoader != null) {
-                if (!(admittedPath instanceof String pathValue)
-                    || !(admittedLoader instanceof ClassLoader loaderValue)) {
-                    throw new IllegalStateException("Vecture3D process admission state is invalid");
-                }
-                if (loaderValue != definingLoader) {
+            String admittedPath = processState.getProperty(PROCESS_PATH_KEY);
+            if (admittedPath != null) {
+                if (loadedLibrary == null) {
                     throw new IllegalStateException(
                         "Vecture3D must be loaded once from a shared parent classloader"
                     );
                 }
-                if (!pathValue.equals(realPath.toString())) {
-                    throw new IllegalStateException("Vecture3D is already loaded from " + pathValue);
-                }
-                if (loadedLibrary == null) {
-                    throw new IllegalStateException("Vecture3D defining loader lost its admitted wrapper instance");
+                if (!admittedPath.equals(realPath.toString())) {
+                    throw new IllegalStateException("Vecture3D is already loaded from " + admittedPath);
                 }
                 return loadedLibrary;
+            }
+            if (loadedLibrary != null) {
+                throw new IllegalStateException("Vecture3D process admission state is invalid");
             }
 
             // NOTE: Jextract resolves loader symbols when its generated classes initialize
@@ -57,8 +50,7 @@ public final class V3NativeLibrary {
             }
 
             loadedLibrary = new V3NativeLibrary();
-            processState.put(PROCESS_PATH_KEY, realPath.toString());
-            processState.put(PROCESS_LOADER_KEY, definingLoader);
+            processState.setProperty(PROCESS_PATH_KEY, realPath.toString());
             return loadedLibrary;
         }
     }
