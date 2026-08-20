@@ -1,3 +1,26 @@
 plugins {
     id 'java-library'
+    id 'maven-publish'
+    id 'de.infolektuell.jextract' version '1.4.0'
+}
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.12.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.12.2'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+}
+
+jextract.libraries {
+    def v3 = register('v3') {
+        header = layout.projectDirectory.file('src/main/public/v3_abi.h')
+        headerClassName = 'V3Abi'
+        targetPackage = 'dev.hytalemodding.vecture3d.ffi.generated'
+    }
+    sourceSets.main {
+        jextract.libraries.addLater(v3)
+    }
 }

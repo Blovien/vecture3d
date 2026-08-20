@@ -6,7 +6,7 @@ group = 'dev.hytalemodding'
 version = '0.1.0-SNAPSHOT'
 
 java {
-    toolchain.languageVersion = JavaLanguageVersion.of(25)
+    toolchain.languageVersion = JavaLanguageVersion.of(java_version as Integer)
 }
 
 subprojects {
@@ -19,7 +19,7 @@ subprojects {
 
     plugins.withType(JavaPlugin).configureEach {
         java {
-            toolchain.languageVersion = JavaLanguageVersion.of(25)
+            toolchain.languageVersion = JavaLanguageVersion.of(rootProject.java_version as Integer)
         }
     }
 }
