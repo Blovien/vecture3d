@@ -70,7 +70,7 @@ public final class V3NativeLibrary {
         }
     }
 
-    int activeWorldCount() {
+    public int activeWorldCount() {
         return V3Abi.v3_active_world_count();
     }
 
