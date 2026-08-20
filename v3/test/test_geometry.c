@@ -111,6 +111,11 @@ static int test_terrain_payload_is_retained_after_caller_overwrite( void )
 	v3_body_entry* terrain_entry = find_entry( world, section.logical_id );
 	ENSURE( dynamic_entry != NULL && terrain_entry != NULL );
 	ENSURE( b3Shape_GetType( terrain_entry->shape_id ) == b3_voxelShape );
+	const b3SurfaceMaterial* retained_materials = b3GetCompoundMaterials( terrain_entry->owned_voxel );
+	b3ChildShape retained_run = b3GetCompoundChild( terrain_entry->owned_voxel, 0 );
+	b3ChildShape retained_detail = b3GetCompoundChild( terrain_entry->owned_voxel, 1 );
+	ENSURE( retained_materials[retained_run.materialIndices[0]].userMaterialId == section.logical_id );
+	ENSURE( retained_materials[retained_detail.materialIndices[0]].userMaterialId == UINT64_C( 7001 ) );
 
 	b3World_Step( world->world_id, V3_TEST_FIXED_STEP, 4 );
 	ENSURE( b3Body_GetContactCapacity( dynamic_entry->body_id ) > 0 );
