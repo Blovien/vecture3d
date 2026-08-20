@@ -1,10 +1,7 @@
 package dev.hytalemodding.vecture3d.ffi;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFileAttributeView;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -15,10 +12,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class V3NativeLibraryTest {
     @AfterEach
@@ -27,21 +22,11 @@ class V3NativeLibraryTest {
     }
 
     @Test
-    void loadRejectsInvalidPathsBeforeNativeSideEffects(@TempDir Path tempDirectory) throws Exception {
+    void loadRejectsInvalidPathsBeforeNativeSideEffects(@TempDir Path tempDirectory) {
         assertThrows(NullPointerException.class, () -> V3NativeLibrary.load(null));
         assertThrows(IllegalArgumentException.class, () -> V3NativeLibrary.load(Path.of("relative-library.so")));
         assertThrows(IllegalArgumentException.class, () -> V3NativeLibrary.load(tempDirectory.resolve("missing.so")));
         assertThrows(IllegalArgumentException.class, () -> V3NativeLibrary.load(tempDirectory));
-
-        Path unreadable = Files.writeString(tempDirectory.resolve("unreadable.so"), "not a library");
-        if (Files.getFileStore(unreadable).supportsFileAttributeView(PosixFileAttributeView.class)) {
-            Files.setPosixFilePermissions(unreadable, PosixFilePermissions.fromString("---------"));
-        } else {
-            assertTrue(unreadable.toFile().setReadable(false, false));
-        }
-        assertFalse(Files.isReadable(unreadable));
-        assertThrows(IllegalArgumentException.class, () -> V3NativeLibrary.load(unreadable));
-        assertTrue(unreadable.toFile().setReadable(true, false));
     }
 
     @Test

@@ -33,7 +33,7 @@ def nullWorldLibraryFile = layout.buildDirectory.file("native-test/bin/${System.
 
 def configureV3Native = tasks.register('configureV3Native', Exec) {
     workingDir rootProject.projectDir
-    commandLine 'cmake', '--preset', 'v3-release'
+    commandLine 'cmake', '--preset', 'v3-release', '-DBOX3D_SAMPLES=OFF'
 }
 
 def buildV3Native = tasks.register('buildV3Native', Exec) {
