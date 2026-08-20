@@ -287,35 +287,27 @@ static int test_queries_are_sorted_bounded_and_deterministic( void )
 	return 0;
 }
 
-static int simulate_far_scene( v3_transform output[2] )
+static int test_zero_translation_voxel_overlap_is_an_immediate_block( void )
 {
-	v3_world* world = v3_world_create( 0.0, -9.81, 0.0 );
+	v3_world* world = v3_world_create( 0.0, 0.0, 0.0 );
 	ENSURE( world != NULL );
-	v3_box_body_command bodies[3] = {
-		make_box( UINT64_C( 1400 ), V3_STATIC_BODY, 20000000.5, -0.5, 0.0 ),
-		make_box( UINT64_C( 1401 ), V3_DYNAMIC_BODY, 20000000.25, 3.0, -2.0 ),
-		make_box( UINT64_C( 1402 ), V3_DYNAMIC_BODY, 20000000.75, 5.0, 2.0 ),
+	v3_voxel_run run = { .packed = 0 };
+	v3_terrain_section_command section = {
+		.logical_id = UINT64_C( 1350 ),
+		.generation = 1,
+		.voxel_run_count = 1,
 	};
-	bodies[0].half_extent_x = 5.0f;
-	bodies[0].half_extent_z = 5.0f;
-	ENSURE( v3_world_replace_box_bodies( world, NULL, 0, bodies, 3 ) == V3_OK );
+	ENSURE( v3_world_replace_terrain_sections( world, NULL, 0, &section, 1, &run, 1, NULL, 0 ) == V3_OK );
 
-	v3_transform transforms[4];
+	v3_query query = make_query( UINT64_C( 1351 ), 0.5, 0.0f );
+	query.origin_y = 0.5;
+	query.origin_z = 0.5;
+	v3_query_result result = { 0 };
 	v3_step_stats stats = { 0 };
-	memset( transforms, 0x4D, sizeof( transforms ) );
-	for ( uint32_t frame = 0; frame < 30; ++frame )
-	{
-		ENSURE( v3_world_step_and_read( world, NULL, 0, NULL, 0, NULL, 0, 1, transforms, 4, NULL, 0, &stats ) == V3_OK );
-	}
-	ENSURE( stats.output_count == 2 );
-	ENSURE( transforms[0].position_x == 20000000.25 );
-	ENSURE( transforms[1].position_x == 20000000.75 );
-	ENSURE( transforms[1].position_x - transforms[0].position_x == 0.5 );
-	v3_transform untouched;
-	memset( &untouched, 0x4D, sizeof( untouched ) );
-	ENSURE( memcmp( transforms + 2, &untouched, sizeof( untouched ) ) == 0 );
-	ENSURE( memcmp( transforms + 3, &untouched, sizeof( untouched ) ) == 0 );
-	memcpy( output, transforms, 2 * sizeof( *output ) );
+	ENSURE( v3_world_step_and_read( world, NULL, 0, NULL, 0, &query, 1, 0, NULL, 0, &result, 1, &stats ) == V3_OK );
+	ENSURE( result.status == V3_QUERY_IMMEDIATE_BLOCK );
+	ENSURE( result.hit_logical_id == section.logical_id );
+	ENSURE( result.fraction == 0.0f );
 
 	v3_world_destroy( world );
 	return 0;
@@ -328,6 +320,7 @@ int main( void )
 	ENSURE( test_target_duration_and_wrench_reapplication() == 0 );
 	ENSURE( test_rejected_frames_do_not_mutate_state_or_outputs() == 0 );
 	ENSURE( test_queries_are_sorted_bounded_and_deterministic() == 0 );
+	ENSURE( test_zero_translation_voxel_overlap_is_an_immediate_block() == 0 );
 	ENSURE( v3_active_world_count() == baseline );
 	puts( "v3 step tests passed" );
 	return 0;

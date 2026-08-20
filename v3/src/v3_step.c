@@ -251,6 +251,15 @@ static v3_query_result v3_step_run_query( const v3_world* world, const v3_query*
 
 	b3Vec3 translation = { query->translation_x, query->translation_y, query->translation_z };
 	b3World_CastShape( world->world_id, origin, &proxy, translation, filter, v3_step_cast_callback, &callback );
+	if ( callback.hit && callback.fraction <= 0.0f )
+	{
+		return (v3_query_result){
+			.query_id = query->query_id,
+			.status = V3_QUERY_IMMEDIATE_BLOCK,
+			.hit_logical_id = callback.hit_logical_id,
+			.fraction = 0.0f,
+		};
+	}
 	return (v3_query_result){
 		.query_id = query->query_id,
 		.status = callback.hit ? V3_QUERY_CAST_HIT : V3_QUERY_NO_HIT,
