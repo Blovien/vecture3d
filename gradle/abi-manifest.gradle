@@ -1,0 +1,267 @@
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
+import java.security.MessageDigest
+
+def projectRoot = rootProject.layout.projectDirectory.asFile.toPath()
+def publicHeader = projectRoot.resolve('ffi-java/src/main/public/v3_abi.h')
+def checkedManifest = projectRoot.resolve('ffi-java/src/main/abi/v3_abi_manifest.json')
+def checkedManifestHeader = projectRoot.resolve('ffi-java/src/main/public/v3_abi_manifest.h')
+
+def runClang = { List<String> arguments ->
+    def command = ['clang'] + arguments
+    def output = providers.exec {
+        commandLine command
+        ignoreExitValue = true
+    }
+    def result = output.result.get()
+    if (result.exitValue != 0) {
+        throw new GradleException(
+            "Clang failed (${command.join(' ')}):\n${output.standardError.asText.get()}"
+        )
+    }
+    output.standardOutput.asText.get()
+}
+
+def nodeOriginatesInHeader = { Map node, String headerText ->
+    String name = node.name
+    def offset = node.loc?.offset
+    if (name == null || !(offset instanceof Number)) {
+        return false
+    }
+
+    int start = offset.intValue()
+    int end = start + name.length()
+    start >= 0 && end <= headerText.length() && headerText.substring(start, end) == name
+}
+
+def parseSymbols = { String astJson, String headerText ->
+    Map ast = new JsonSlurper().parseText(astJson) as Map
+    String expectedHeader = publicHeader.toAbsolutePath().normalize().toString()
+    String currentFile = null
+    List<Map> nodes = []
+    (ast.inner ?: []).each { Map node ->
+        if (node.loc?.file != null) {
+            Path location = Paths.get(node.loc.file.toString())
+            currentFile = (location.isAbsolute() ? location : projectRoot.resolve(location))
+                .normalize()
+                .toString()
+        }
+        String name = node.name
+        if (currentFile == expectedHeader && name?.startsWith('v3_') && nodeOriginatesInHeader(node, headerText)) {
+            nodes.add(node)
+        }
+    }
+
+    List<Map> symbols = []
+
+    nodes.each { Map node ->
+        if (node.kind == 'RecordDecl') {
+            if (node.completeDefinition == true) {
+                List<Map> fields = []
+                (node.inner ?: []).findAll { it.kind == 'FieldDecl' }.eachWithIndex { Map field, int ordinal ->
+                    fields.add([
+                        name: field.name,
+                        ordinal: ordinal,
+                        type: field.type?.qualType
+                    ] as LinkedHashMap)
+                }
+                fields.sort { left, right -> left.name <=> right.name }
+                symbols.add([
+                    kind: 'record',
+                    name: node.name,
+                    fields: fields
+                ] as LinkedHashMap)
+            } else {
+                symbols.add([
+                    kind: 'opaque',
+                    name: node.name
+                ] as LinkedHashMap)
+            }
+        } else if (node.kind == 'TypedefDecl') {
+            symbols.add([
+                kind: 'typedef',
+                name: node.name,
+                type: node.type?.qualType
+            ] as LinkedHashMap)
+        } else if (node.kind == 'FunctionDecl') {
+            List<Map> parameters = []
+            (node.inner ?: []).findAll { it.kind == 'ParmVarDecl' }.eachWithIndex { Map parameter, int ordinal ->
+                parameters.add([
+                    name: parameter.name,
+                    ordinal: ordinal,
+                    type: parameter.type?.qualType
+                ] as LinkedHashMap)
+            }
+            symbols.add([
+                kind: 'function',
+                name: node.name,
+                type: node.type?.qualType,
+                parameters: parameters
+            ] as LinkedHashMap)
+        }
+    }
+
+    symbols.sort { left, right ->
+        int byName = left.name <=> right.name
+        byName != 0 ? byName : left.kind <=> right.kind
+    }
+
+    Set<List<String>> duplicateKeys = symbols
+            .groupBy { symbol -> [symbol.name, symbol.kind] }
+            .findAll { ignored, entries -> entries.size() > 1 }
+            .keySet() as Set<List<String>>
+    if (!duplicateKeys.isEmpty()) {
+        String duplicates = duplicateKeys
+                .collect { key -> "${key[0]} (${key[1]})" }
+                .sort()
+                .join(', ')
+        throw new GradleException("Duplicate public ABI symbols: ${duplicates}")
+    }
+
+    symbols
+}
+
+def parseNumericConstants = { String macroOutput ->
+    List<Map> constants = []
+    macroOutput.readLines().each { String line ->
+        def definition = line =~ /^#define (V3_[A-Za-z0-9_]+)\s+(.+)$/
+        if (!definition.matches()) {
+            return
+        }
+
+        String name = definition.group(1)
+        if (name == 'V3_ABI_VERSION' || name == 'V3_ABI_SCHEMA_HASH') {
+            return
+        }
+
+        String expression = definition.group(2).trim()
+        def numeric = expression =~ /^U?INT(?:8|16|32|64)_C\(\s*([-+]?(?:0[xX][0-9A-Fa-f]+|[0-9]+))\s*\)\u0024/
+        if (!numeric.matches()) {
+            return
+        }
+
+        String literal = numeric.group(1)
+        boolean negative = literal.startsWith('-')
+        String unsignedLiteral = (literal.startsWith('-') || literal.startsWith('+')) ? literal.substring(1) : literal
+        BigInteger value = unsignedLiteral.toLowerCase(Locale.ROOT).startsWith('0x')
+            ? new BigInteger(unsignedLiteral.substring(2), 16)
+            : new BigInteger(unsignedLiteral, 10)
+        constants.add([
+            name: name,
+            value: negative ? value.negate() : value
+        ] as LinkedHashMap)
+    }
+
+    constants.sort { left, right -> left.name <=> right.name }
+    constants
+}
+
+def renderManifestHeader = { String hashHex ->
+    """// Generated from v3_abi.h by ./gradlew updateAbiManifest. Do not edit manually.
+#ifndef V3_ABI_MANIFEST_H
+#define V3_ABI_MANIFEST_H
+
+#define V3_ABI_VERSION UINT32_C(1)
+#define V3_ABI_SCHEMA_HASH UINT64_C(0x${hashHex})
+
+#endif
+"""
+}
+
+def generateManifest = { Path manifestPath, Path manifestHeaderPath ->
+    String headerText = Files.readString(publicHeader, StandardCharsets.UTF_8)
+    String astJson = runClang([
+        '-std=c17',
+        '-Xclang', '-ast-dump=json',
+        '-fsyntax-only',
+        publicHeader.toString()
+    ])
+    String macroOutput = runClang([
+        '-std=c17',
+        '-dM',
+        '-E',
+        publicHeader.toString()
+    ])
+
+    Map manifest = [
+        _generated: [
+            notice: 'Generated file. Do not edit manually.',
+            source: 'ffi-java/src/main/public/v3_abi.h',
+            command: './gradlew updateAbiManifest'
+        ] as LinkedHashMap,
+        format: 1,
+        constants: parseNumericConstants(macroOutput),
+        symbols: parseSymbols(astJson, headerText)
+    ] as LinkedHashMap
+    String manifestText = JsonOutput.prettyPrint(JsonOutput.toJson(manifest))
+        .replaceAll('(?m)[ \\t]+$', '') + '\n'
+    byte[] manifestBytes = manifestText.getBytes(StandardCharsets.UTF_8)
+    byte[] digest = MessageDigest.getInstance('SHA-256').digest(manifestBytes)
+    String hashHex = (0..<8).collect { index -> String.format('%02x', digest[index] & 0xff) }.join()
+    if (hashHex == '0000000000000000') {
+        throw new GradleException('Generated V3 ABI schema hash must not be zero')
+    }
+
+    Files.createDirectories(manifestPath.parent)
+    Files.createDirectories(manifestHeaderPath.parent)
+    Files.write(manifestPath, manifestBytes)
+    Files.writeString(manifestHeaderPath, renderManifestHeader(hashHex), StandardCharsets.UTF_8)
+    logger.lifecycle("V3 ABI schema hash: 0x${hashHex}")
+}
+
+def assertManifestPreservesRecordTypedefPair = { Path manifestPath ->
+    Map manifest = new JsonSlurper().parseText(
+        Files.readString(manifestPath, StandardCharsets.UTF_8)
+    ) as Map
+    String symbolName = 'v3_body_handle'
+    boolean hasRecord = (manifest.symbols ?: []).any { Map symbol ->
+        symbol.name == symbolName && symbol.kind == 'record'
+    }
+    boolean hasTypedef = (manifest.symbols ?: []).any { Map symbol ->
+        symbol.name == symbolName && symbol.kind == 'typedef'
+    }
+    if (!hasRecord || !hasTypedef) {
+        throw new GradleException(
+            "ABI manifest regression: ${symbolName} must retain both record and typedef declarations"
+        )
+    }
+}
+
+tasks.register('updateAbiManifest') {
+    group = 'build setup'
+    description = 'Regenerates the checked-in V3 ABI manifest and hash header.'
+
+    doLast {
+        generateManifest(checkedManifest, checkedManifestHeader)
+    }
+}
+
+tasks.register('checkAbiManifest') {
+    group = 'verification'
+    description = 'Verifies the checked-in V3 ABI manifest without changing source files.'
+
+    doLast {
+        String checkedHeaderText = Files.readString(checkedManifestHeader, StandardCharsets.UTF_8)
+        if (checkedHeaderText =~ /V3_ABI_SCHEMA_HASH\s+UINT64_C\(0\)/) {
+            throw new GradleException('Checked-in V3 ABI schema hash must not be zero')
+        }
+
+        Path temporaryDirectory = layout.buildDirectory.dir('tmp/abiManifest/check').get().asFile.toPath()
+        Path temporaryManifest = temporaryDirectory.resolve('v3_abi_manifest.json')
+        Path temporaryHeader = temporaryDirectory.resolve('v3_abi_manifest.h')
+        generateManifest(temporaryManifest, temporaryHeader)
+        assertManifestPreservesRecordTypedefPair(temporaryManifest)
+
+        if (Files.mismatch(checkedManifest, temporaryManifest) != -1L) {
+            throw new GradleException('v3_abi_manifest.json is stale; run ./gradlew updateAbiManifest')
+        }
+        if (Files.mismatch(checkedManifestHeader, temporaryHeader) != -1L) {
+            throw new GradleException('v3_abi_manifest.h is stale; run ./gradlew updateAbiManifest')
+        }
+    }
+}

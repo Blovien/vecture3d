@@ -1330,6 +1330,10 @@ static bool DrawQueryCallback( int proxyId, uint64_t userData, void* context )
 					debugShape.compound = shape->compound;
 					shape->userShape = world->createDebugShape( &debugShape, world->userDebugShapeContext );
 					break;
+				case b3_voxelShape:
+					debugShape.voxel = shape->voxel;
+					shape->userShape = world->createDebugShape( &debugShape, world->userDebugShapeContext );
+					break;
 				case b3_heightShape:
 					debugShape.heightField = shape->heightField;
 					shape->userShape = world->createDebugShape( &debugShape, world->userDebugShapeContext );
@@ -2187,6 +2191,7 @@ b3Counters b3World_GetCounters( b3WorldId worldId )
 	b3DynamicTree* dynamicTree = world->broadPhase.trees + b3_dynamicBody;
 	b3DynamicTree* kinematicTree = world->broadPhase.trees + b3_kinematicBody;
 	s.treeHeight = b3MaxInt( b3DynamicTree_GetHeight( dynamicTree ), b3DynamicTree_GetHeight( kinematicTree ) );
+	s.heapMovePairCount = world->heapMovePairCount;
 
 	s.satCallCount = world->satCallCount;
 	s.satCacheHitCount = world->satCacheHitCount;
@@ -4073,8 +4078,10 @@ void b3ValidateContacts( b3World* world )
 				}
 				else
 				{
-					B3_ASSERT( shapeA->type == b3_compoundShape );
-					b3ChildShape child = b3GetCompoundChild( shapeA->compound, contact->childIndex );
+					B3_ASSERT( shapeA->type == b3_compoundShape || shapeA->type == b3_voxelShape );
+					const b3CompoundData* compound =
+						shapeA->type == b3_compoundShape ? shapeA->compound : shapeA->voxel;
+					b3ChildShape child = b3GetCompoundChild( compound, contact->childIndex );
 					B3_ASSERT( child.type == b3_meshShape );
 
 					int triangleCount = child.mesh.data->triangleCount;

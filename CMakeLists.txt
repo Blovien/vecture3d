@@ -140,10 +140,14 @@ add_subdirectory(src)
 
 # This hides samples, test, and doxygen from apps that use box3d via FetchContent
 if(PROJECT_IS_TOP_LEVEL)
+	enable_testing()
 	option(BOX3D_SAMPLES "Build the Box3D samples" ON)
 	option(BOX3D_BENCHMARKS "Build the Box3D benchmarks" OFF)
 	option(BOX3D_DOCS "Build the Box3D documentation" OFF)
 	option(BOX3D_UNIT_TESTS "Build the Box3D unit tests" ON)
+	if(BOX3D_DOUBLE_PRECISION)
+		add_subdirectory(v3)
+	endif()
 
 	# Enable this for shader development using sokol-shdc.
 	# This can be a large download, so this is disabled by default.
@@ -157,7 +161,7 @@ if(PROJECT_IS_TOP_LEVEL)
 	if(NOT BUILD_SHARED_LIBS AND BOX3D_UNIT_TESTS)
 		message(STATUS "Adding Box3D unit tests")
 		add_subdirectory(test)
-		set_target_properties(test PROPERTIES XCODE_GENERATE_SCHEME TRUE)
+		set_target_properties(box3d_test PROPERTIES XCODE_GENERATE_SCHEME TRUE)
 	else()
 		message(STATUS "Skipping Box3D unit tests")
 	endif()

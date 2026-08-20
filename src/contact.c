@@ -138,6 +138,9 @@ void b3InitializeContactRegisters( void )
 		b3AddType( b3_heightShape, b3_sphereShape );
 		b3AddType( b3_heightShape, b3_capsuleShape );
 		b3AddType( b3_heightShape, b3_hullShape );
+		b3AddType( b3_voxelShape, b3_sphereShape );
+		b3AddType( b3_voxelShape, b3_capsuleShape );
+		b3AddType( b3_voxelShape, b3_hullShape );
 		s_initialized = true;
 	}
 }
@@ -221,9 +224,11 @@ void b3CreateContact( b3World* world, b3Shape* shapeA, b3Shape* shapeB, int chil
 	{
 		contact->flags |= b3_simMeshContact;
 	}
-	else if ( shapeA->type == b3_compoundShape )
+	else if ( shapeA->type == b3_compoundShape || shapeA->type == b3_voxelShape )
 	{
-		b3ChildShape child = b3GetCompoundChild( shapeA->compound, childIndex );
+		const b3CompoundData* compound =
+			shapeA->type == b3_compoundShape ? shapeA->compound : shapeA->voxel;
+		b3ChildShape child = b3GetCompoundChild( compound, childIndex );
 		if ( child.type == b3_meshShape )
 		{
 			contact->flags |= b3_simMeshContact;
@@ -732,12 +737,14 @@ bool b3UpdateContact( b3World* world, int workerIndex, b3Contact* contact, b3Sha
 {
 	bool touching;
 
-	B3_ASSERT( shapeB->type != b3_compoundShape );
+	B3_ASSERT( shapeB->type != b3_compoundShape && shapeB->type != b3_voxelShape );
 
-	if ( shapeA->type == b3_compoundShape )
+	if ( shapeA->type == b3_compoundShape || shapeA->type == b3_voxelShape )
 	{
 		int childIndex = contact->childIndex;
-		b3ChildShape child = b3GetCompoundChild( shapeA->compound, childIndex );
+		const b3CompoundData* compound =
+			shapeA->type == b3_compoundShape ? shapeA->compound : shapeA->voxel;
+		b3ChildShape child = b3GetCompoundChild( compound, childIndex );
 
 		// Temporary child shape to match existing function signatures
 		b3Shape childShapeA;

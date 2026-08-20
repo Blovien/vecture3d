@@ -1,0 +1,2240 @@
+{
+    "_generated": {
+        "notice": "Generated file. Do not edit manually.",
+        "source": "ffi-java/src/main/public/v3_abi.h",
+        "command": "./gradlew updateAbiManifest"
+    },
+    "format": 1,
+    "constants": [
+        {
+            "name": "V3_BODY_DISABLE_COLLISION",
+            "value": 4
+        },
+        {
+            "name": "V3_BODY_ENABLE_SLEEP",
+            "value": 1
+        },
+        {
+            "name": "V3_BODY_INITIAL_AWAKE",
+            "value": 2
+        },
+        {
+            "name": "V3_CAPACITY_RESERVATION_FAILED",
+            "value": 31
+        },
+        {
+            "name": "V3_DUPLICATE_CELL",
+            "value": 22
+        },
+        {
+            "name": "V3_DUPLICATE_FEATURE",
+            "value": 24
+        },
+        {
+            "name": "V3_DUPLICATE_ID",
+            "value": 3
+        },
+        {
+            "name": "V3_DYNAMIC_BODY",
+            "value": 2
+        },
+        {
+            "name": "V3_FRACTURE_PLAN_CONSUMED",
+            "value": 30
+        },
+        {
+            "name": "V3_FRACTURE_PLAN_NOT_BOUND",
+            "value": 28
+        },
+        {
+            "name": "V3_FRACTURE_PLAN_STALE",
+            "value": 29
+        },
+        {
+            "name": "V3_GENERATION_EXHAUSTED",
+            "value": 14
+        },
+        {
+            "name": "V3_INVALID_ARGUMENT",
+            "value": 1
+        },
+        {
+            "name": "V3_INVALID_BLOCK_FIELD",
+            "value": 26
+        },
+        {
+            "name": "V3_INVALID_CELL",
+            "value": 21
+        },
+        {
+            "name": "V3_INVALID_DAMPING",
+            "value": 15
+        },
+        {
+            "name": "V3_INVALID_DENSITY",
+            "value": 9
+        },
+        {
+            "name": "V3_INVALID_DIMENSION",
+            "value": 8
+        },
+        {
+            "name": "V3_INVALID_FEATURE",
+            "value": 23
+        },
+        {
+            "name": "V3_INVALID_FRACTURE_TRIGGER",
+            "value": 33
+        },
+        {
+            "name": "V3_INVALID_FRICTION",
+            "value": 10
+        },
+        {
+            "name": "V3_INVALID_GENERATION",
+            "value": 12
+        },
+        {
+            "name": "V3_INVALID_MATERIAL",
+            "value": 20
+        },
+        {
+            "name": "V3_INVALID_OWNER",
+            "value": 25
+        },
+        {
+            "name": "V3_INVALID_QUATERNION",
+            "value": 16
+        },
+        {
+            "name": "V3_INVALID_TARGET",
+            "value": 17
+        },
+        {
+            "name": "V3_INVALID_WRENCH",
+            "value": 19
+        },
+        {
+            "name": "V3_JOINT_ATTACHED",
+            "value": 18
+        },
+        {
+            "name": "V3_JOINT_ENABLE_LIMIT",
+            "value": 2
+        },
+        {
+            "name": "V3_JOINT_ENABLE_SPRING",
+            "value": 1
+        },
+        {
+            "name": "V3_KINEMATIC_BODY",
+            "value": 1
+        },
+        {
+            "name": "V3_LIMIT_EXCEEDED",
+            "value": 2
+        },
+        {
+            "name": "V3_NATIVE_FAILURE",
+            "value": 5
+        },
+        {
+            "name": "V3_NON_FINITE",
+            "value": 7
+        },
+        {
+            "name": "V3_NO_FRACTURE",
+            "value": 35
+        },
+        {
+            "name": "V3_OK",
+            "value": 0
+        },
+        {
+            "name": "V3_OUTPUT_TOO_SMALL",
+            "value": 6
+        },
+        {
+            "name": "V3_OUT_OF_MEMORY",
+            "value": 4
+        },
+        {
+            "name": "V3_PEAK_LIMIT_EXCEEDED",
+            "value": 13
+        },
+        {
+            "name": "V3_PENDING_FRACTURE_PLAN",
+            "value": 27
+        },
+        {
+            "name": "V3_QUERY_CAST_HIT",
+            "value": 2
+        },
+        {
+            "name": "V3_QUERY_IMMEDIATE_BLOCK",
+            "value": 1
+        },
+        {
+            "name": "V3_QUERY_NO_HIT",
+            "value": 0
+        },
+        {
+            "name": "V3_SOURCE_REVISION_MISMATCH",
+            "value": 32
+        },
+        {
+            "name": "V3_STALE_HANDLE",
+            "value": 11
+        },
+        {
+            "name": "V3_STATIC_BODY",
+            "value": 0
+        },
+        {
+            "name": "V3_WORLD_POISONED",
+            "value": 34
+        },
+        {
+            "name": "V3_WRENCH_WAKE",
+            "value": 1
+        }
+    ],
+    "symbols": [
+        {
+            "kind": "function",
+            "name": "v3_abi_schema_hash",
+            "type": "uint64_t (void)",
+            "parameters": [
+
+            ]
+        },
+        {
+            "kind": "function",
+            "name": "v3_abi_version",
+            "type": "uint32_t (void)",
+            "parameters": [
+
+            ]
+        },
+        {
+            "kind": "function",
+            "name": "v3_active_world_count",
+            "type": "uint32_t (void)",
+            "parameters": [
+
+            ]
+        },
+        {
+            "kind": "record",
+            "name": "v3_block_box",
+            "fields": [
+                {
+                    "name": "center_x",
+                    "ordinal": 0,
+                    "type": "float"
+                },
+                {
+                    "name": "center_y",
+                    "ordinal": 1,
+                    "type": "float"
+                },
+                {
+                    "name": "center_z",
+                    "ordinal": 2,
+                    "type": "float"
+                },
+                {
+                    "name": "feature_id",
+                    "ordinal": 8,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "half_extent_x",
+                    "ordinal": 3,
+                    "type": "float"
+                },
+                {
+                    "name": "half_extent_y",
+                    "ordinal": 4,
+                    "type": "float"
+                },
+                {
+                    "name": "half_extent_z",
+                    "ordinal": 5,
+                    "type": "float"
+                },
+                {
+                    "name": "material_index",
+                    "ordinal": 7,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "owner_cell_index",
+                    "ordinal": 6,
+                    "type": "uint32_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_block_box",
+            "type": "struct v3_block_box"
+        },
+        {
+            "kind": "record",
+            "name": "v3_block_cell",
+            "fields": [
+                {
+                    "name": "feature_id",
+                    "ordinal": 4,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "flags",
+                    "ordinal": 5,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "material_index",
+                    "ordinal": 3,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "reserved",
+                    "ordinal": 6,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "x",
+                    "ordinal": 0,
+                    "type": "int32_t"
+                },
+                {
+                    "name": "y",
+                    "ordinal": 1,
+                    "type": "int32_t"
+                },
+                {
+                    "name": "z",
+                    "ordinal": 2,
+                    "type": "int32_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_block_cell",
+            "type": "struct v3_block_cell"
+        },
+        {
+            "kind": "record",
+            "name": "v3_block_contact_event",
+            "fields": [
+                {
+                    "name": "body_a",
+                    "ordinal": 0,
+                    "type": "v3_body_handle"
+                },
+                {
+                    "name": "body_b",
+                    "ordinal": 1,
+                    "type": "v3_body_handle"
+                },
+                {
+                    "name": "feature_id_a",
+                    "ordinal": 2,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "feature_id_b",
+                    "ordinal": 3,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "fixed_step_index",
+                    "ordinal": 15,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "flags",
+                    "ordinal": 14,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "impulse_x",
+                    "ordinal": 10,
+                    "type": "float"
+                },
+                {
+                    "name": "impulse_y",
+                    "ordinal": 11,
+                    "type": "float"
+                },
+                {
+                    "name": "impulse_z",
+                    "ordinal": 12,
+                    "type": "float"
+                },
+                {
+                    "name": "normal_x",
+                    "ordinal": 7,
+                    "type": "float"
+                },
+                {
+                    "name": "normal_y",
+                    "ordinal": 8,
+                    "type": "float"
+                },
+                {
+                    "name": "normal_z",
+                    "ordinal": 9,
+                    "type": "float"
+                },
+                {
+                    "name": "point_x",
+                    "ordinal": 4,
+                    "type": "float"
+                },
+                {
+                    "name": "point_y",
+                    "ordinal": 5,
+                    "type": "float"
+                },
+                {
+                    "name": "point_z",
+                    "ordinal": 6,
+                    "type": "float"
+                },
+                {
+                    "name": "relative_normal_speed",
+                    "ordinal": 13,
+                    "type": "float"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_block_contact_event",
+            "type": "struct v3_block_contact_event"
+        },
+        {
+            "kind": "record",
+            "name": "v3_block_field_command",
+            "fields": [
+                {
+                    "name": "body",
+                    "ordinal": 0,
+                    "type": "v3_body_definition"
+                },
+                {
+                    "name": "box_count",
+                    "ordinal": 7,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "box_offset",
+                    "ordinal": 6,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "cell_count",
+                    "ordinal": 5,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "cell_offset",
+                    "ordinal": 4,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "material_count",
+                    "ordinal": 3,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "material_offset",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "source_revision",
+                    "ordinal": 1,
+                    "type": "uint64_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_block_field_command",
+            "type": "struct v3_block_field_command"
+        },
+        {
+            "kind": "record",
+            "name": "v3_block_material",
+            "fields": [
+                {
+                    "name": "bond_strength",
+                    "ordinal": 4,
+                    "type": "float"
+                },
+                {
+                    "name": "compressive_factor",
+                    "ordinal": 5,
+                    "type": "float"
+                },
+                {
+                    "name": "density",
+                    "ordinal": 1,
+                    "type": "float"
+                },
+                {
+                    "name": "flags",
+                    "ordinal": 6,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "friction",
+                    "ordinal": 2,
+                    "type": "float"
+                },
+                {
+                    "name": "material_id",
+                    "ordinal": 0,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "restitution",
+                    "ordinal": 3,
+                    "type": "float"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_block_material",
+            "type": "struct v3_block_material"
+        },
+        {
+            "kind": "record",
+            "name": "v3_body_definition",
+            "fields": [
+                {
+                    "name": "angular_damping",
+                    "ordinal": 17,
+                    "type": "float"
+                },
+                {
+                    "name": "angular_velocity_x",
+                    "ordinal": 13,
+                    "type": "float"
+                },
+                {
+                    "name": "angular_velocity_y",
+                    "ordinal": 14,
+                    "type": "float"
+                },
+                {
+                    "name": "angular_velocity_z",
+                    "ordinal": 15,
+                    "type": "float"
+                },
+                {
+                    "name": "flags",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "handle",
+                    "ordinal": 0,
+                    "type": "v3_body_handle"
+                },
+                {
+                    "name": "kind",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "linear_damping",
+                    "ordinal": 16,
+                    "type": "float"
+                },
+                {
+                    "name": "linear_velocity_x",
+                    "ordinal": 10,
+                    "type": "float"
+                },
+                {
+                    "name": "linear_velocity_y",
+                    "ordinal": 11,
+                    "type": "float"
+                },
+                {
+                    "name": "linear_velocity_z",
+                    "ordinal": 12,
+                    "type": "float"
+                },
+                {
+                    "name": "position_x",
+                    "ordinal": 3,
+                    "type": "double"
+                },
+                {
+                    "name": "position_y",
+                    "ordinal": 4,
+                    "type": "double"
+                },
+                {
+                    "name": "position_z",
+                    "ordinal": 5,
+                    "type": "double"
+                },
+                {
+                    "name": "rotation_w",
+                    "ordinal": 9,
+                    "type": "float"
+                },
+                {
+                    "name": "rotation_x",
+                    "ordinal": 6,
+                    "type": "float"
+                },
+                {
+                    "name": "rotation_y",
+                    "ordinal": 7,
+                    "type": "float"
+                },
+                {
+                    "name": "rotation_z",
+                    "ordinal": 8,
+                    "type": "float"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_body_definition",
+            "type": "struct v3_body_definition"
+        },
+        {
+            "kind": "record",
+            "name": "v3_body_handle",
+            "fields": [
+                {
+                    "name": "generation",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "logical_id",
+                    "ordinal": 0,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "reserved",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_body_handle",
+            "type": "struct v3_body_handle"
+        },
+        {
+            "kind": "record",
+            "name": "v3_body_wrench",
+            "fields": [
+                {
+                    "name": "flags",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "force_x",
+                    "ordinal": 3,
+                    "type": "float"
+                },
+                {
+                    "name": "force_y",
+                    "ordinal": 4,
+                    "type": "float"
+                },
+                {
+                    "name": "force_z",
+                    "ordinal": 5,
+                    "type": "float"
+                },
+                {
+                    "name": "generation",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "logical_id",
+                    "ordinal": 0,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "torque_x",
+                    "ordinal": 6,
+                    "type": "float"
+                },
+                {
+                    "name": "torque_y",
+                    "ordinal": 7,
+                    "type": "float"
+                },
+                {
+                    "name": "torque_z",
+                    "ordinal": 8,
+                    "type": "float"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_body_wrench",
+            "type": "struct v3_body_wrench"
+        },
+        {
+            "kind": "record",
+            "name": "v3_box_body_command",
+            "fields": [
+                {
+                    "name": "angular_damping",
+                    "ordinal": 22,
+                    "type": "float"
+                },
+                {
+                    "name": "angular_velocity_x",
+                    "ordinal": 13,
+                    "type": "float"
+                },
+                {
+                    "name": "angular_velocity_y",
+                    "ordinal": 14,
+                    "type": "float"
+                },
+                {
+                    "name": "angular_velocity_z",
+                    "ordinal": 15,
+                    "type": "float"
+                },
+                {
+                    "name": "density",
+                    "ordinal": 19,
+                    "type": "float"
+                },
+                {
+                    "name": "flags",
+                    "ordinal": 23,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "friction",
+                    "ordinal": 20,
+                    "type": "float"
+                },
+                {
+                    "name": "generation",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "half_extent_x",
+                    "ordinal": 16,
+                    "type": "float"
+                },
+                {
+                    "name": "half_extent_y",
+                    "ordinal": 17,
+                    "type": "float"
+                },
+                {
+                    "name": "half_extent_z",
+                    "ordinal": 18,
+                    "type": "float"
+                },
+                {
+                    "name": "kind",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "linear_damping",
+                    "ordinal": 21,
+                    "type": "float"
+                },
+                {
+                    "name": "linear_velocity_x",
+                    "ordinal": 10,
+                    "type": "float"
+                },
+                {
+                    "name": "linear_velocity_y",
+                    "ordinal": 11,
+                    "type": "float"
+                },
+                {
+                    "name": "linear_velocity_z",
+                    "ordinal": 12,
+                    "type": "float"
+                },
+                {
+                    "name": "logical_id",
+                    "ordinal": 0,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "position_x",
+                    "ordinal": 3,
+                    "type": "double"
+                },
+                {
+                    "name": "position_y",
+                    "ordinal": 4,
+                    "type": "double"
+                },
+                {
+                    "name": "position_z",
+                    "ordinal": 5,
+                    "type": "double"
+                },
+                {
+                    "name": "rotation_w",
+                    "ordinal": 9,
+                    "type": "float"
+                },
+                {
+                    "name": "rotation_x",
+                    "ordinal": 6,
+                    "type": "float"
+                },
+                {
+                    "name": "rotation_y",
+                    "ordinal": 7,
+                    "type": "float"
+                },
+                {
+                    "name": "rotation_z",
+                    "ordinal": 8,
+                    "type": "float"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_box_body_command",
+            "type": "struct v3_box_body_command"
+        },
+        {
+            "kind": "record",
+            "name": "v3_distance_joint_command",
+            "fields": [
+                {
+                    "name": "body_a",
+                    "ordinal": 3,
+                    "type": "v3_body_handle"
+                },
+                {
+                    "name": "body_b",
+                    "ordinal": 4,
+                    "type": "v3_body_handle"
+                },
+                {
+                    "name": "damping_ratio",
+                    "ordinal": 15,
+                    "type": "float"
+                },
+                {
+                    "name": "flags",
+                    "ordinal": 18,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "generation",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "hertz",
+                    "ordinal": 14,
+                    "type": "float"
+                },
+                {
+                    "name": "local_anchor_a_x",
+                    "ordinal": 5,
+                    "type": "float"
+                },
+                {
+                    "name": "local_anchor_a_y",
+                    "ordinal": 6,
+                    "type": "float"
+                },
+                {
+                    "name": "local_anchor_a_z",
+                    "ordinal": 7,
+                    "type": "float"
+                },
+                {
+                    "name": "local_anchor_b_x",
+                    "ordinal": 8,
+                    "type": "float"
+                },
+                {
+                    "name": "local_anchor_b_y",
+                    "ordinal": 9,
+                    "type": "float"
+                },
+                {
+                    "name": "local_anchor_b_z",
+                    "ordinal": 10,
+                    "type": "float"
+                },
+                {
+                    "name": "logical_id",
+                    "ordinal": 0,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "lower_spring_force",
+                    "ordinal": 16,
+                    "type": "float"
+                },
+                {
+                    "name": "maximum_length",
+                    "ordinal": 13,
+                    "type": "float"
+                },
+                {
+                    "name": "minimum_length",
+                    "ordinal": 12,
+                    "type": "float"
+                },
+                {
+                    "name": "reserved",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "rest_length",
+                    "ordinal": 11,
+                    "type": "float"
+                },
+                {
+                    "name": "upper_spring_force",
+                    "ordinal": 17,
+                    "type": "float"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_distance_joint_command",
+            "type": "struct v3_distance_joint_command"
+        },
+        {
+            "kind": "record",
+            "name": "v3_field_revision",
+            "fields": [
+                {
+                    "name": "body",
+                    "ordinal": 0,
+                    "type": "v3_body_handle"
+                },
+                {
+                    "name": "source_revision",
+                    "ordinal": 1,
+                    "type": "uint64_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_field_revision",
+            "type": "struct v3_field_revision"
+        },
+        {
+            "kind": "record",
+            "name": "v3_fracture_plan_handle",
+            "fields": [
+                {
+                    "name": "generation",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "logical_id",
+                    "ordinal": 0,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "reserved",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_fracture_plan_handle",
+            "type": "struct v3_fracture_plan_handle"
+        },
+        {
+            "kind": "record",
+            "name": "v3_fracture_plan_summary",
+            "fields": [
+                {
+                    "name": "dust_cell_count",
+                    "ordinal": 6,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "field_mutation_count",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "fragment_cell_count",
+                    "ordinal": 5,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "fragment_count",
+                    "ordinal": 4,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "frozen_world_epoch",
+                    "ordinal": 1,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "plan",
+                    "ordinal": 0,
+                    "type": "v3_fracture_plan_handle"
+                },
+                {
+                    "name": "removed_cell_count",
+                    "ordinal": 3,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "required_fragment_assignment_count",
+                    "ordinal": 7,
+                    "type": "uint32_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_fracture_plan_summary",
+            "type": "struct v3_fracture_plan_summary"
+        },
+        {
+            "kind": "record",
+            "name": "v3_fracture_trigger",
+            "fields": [
+                {
+                    "name": "expected_source_revision",
+                    "ordinal": 1,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "feature_id_a",
+                    "ordinal": 2,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "feature_id_b",
+                    "ordinal": 3,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "flags",
+                    "ordinal": 5,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "impulse_x",
+                    "ordinal": 9,
+                    "type": "float"
+                },
+                {
+                    "name": "impulse_y",
+                    "ordinal": 10,
+                    "type": "float"
+                },
+                {
+                    "name": "impulse_z",
+                    "ordinal": 11,
+                    "type": "float"
+                },
+                {
+                    "name": "kind",
+                    "ordinal": 4,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "point_x",
+                    "ordinal": 6,
+                    "type": "float"
+                },
+                {
+                    "name": "point_y",
+                    "ordinal": 7,
+                    "type": "float"
+                },
+                {
+                    "name": "point_z",
+                    "ordinal": 8,
+                    "type": "float"
+                },
+                {
+                    "name": "radius",
+                    "ordinal": 12,
+                    "type": "float"
+                },
+                {
+                    "name": "reserved",
+                    "ordinal": 13,
+                    "type": "float"
+                },
+                {
+                    "name": "target",
+                    "ordinal": 0,
+                    "type": "v3_body_handle"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_fracture_trigger",
+            "type": "struct v3_fracture_trigger"
+        },
+        {
+            "kind": "record",
+            "name": "v3_fragment_assignment",
+            "fields": [
+                {
+                    "name": "body",
+                    "ordinal": 2,
+                    "type": "v3_body_handle"
+                },
+                {
+                    "name": "fragment_index",
+                    "ordinal": 0,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "reserved",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_fragment_assignment",
+            "type": "struct v3_fragment_assignment"
+        },
+        {
+            "kind": "record",
+            "name": "v3_fragment_descriptor",
+            "fields": [
+                {
+                    "name": "angular_velocity_x",
+                    "ordinal": 16,
+                    "type": "float"
+                },
+                {
+                    "name": "angular_velocity_y",
+                    "ordinal": 17,
+                    "type": "float"
+                },
+                {
+                    "name": "angular_velocity_z",
+                    "ordinal": 18,
+                    "type": "float"
+                },
+                {
+                    "name": "cell_count",
+                    "ordinal": 5,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "cell_offset",
+                    "ordinal": 4,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "flags",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "fragment_index",
+                    "ordinal": 0,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "inertia_xx",
+                    "ordinal": 23,
+                    "type": "float"
+                },
+                {
+                    "name": "inertia_xy",
+                    "ordinal": 26,
+                    "type": "float"
+                },
+                {
+                    "name": "inertia_xz",
+                    "ordinal": 27,
+                    "type": "float"
+                },
+                {
+                    "name": "inertia_yy",
+                    "ordinal": 24,
+                    "type": "float"
+                },
+                {
+                    "name": "inertia_yz",
+                    "ordinal": 28,
+                    "type": "float"
+                },
+                {
+                    "name": "inertia_zz",
+                    "ordinal": 25,
+                    "type": "float"
+                },
+                {
+                    "name": "linear_velocity_x",
+                    "ordinal": 13,
+                    "type": "float"
+                },
+                {
+                    "name": "linear_velocity_y",
+                    "ordinal": 14,
+                    "type": "float"
+                },
+                {
+                    "name": "linear_velocity_z",
+                    "ordinal": 15,
+                    "type": "float"
+                },
+                {
+                    "name": "local_center_x",
+                    "ordinal": 19,
+                    "type": "float"
+                },
+                {
+                    "name": "local_center_y",
+                    "ordinal": 20,
+                    "type": "float"
+                },
+                {
+                    "name": "local_center_z",
+                    "ordinal": 21,
+                    "type": "float"
+                },
+                {
+                    "name": "mass",
+                    "ordinal": 22,
+                    "type": "float"
+                },
+                {
+                    "name": "parent",
+                    "ordinal": 2,
+                    "type": "v3_body_handle"
+                },
+                {
+                    "name": "position_x",
+                    "ordinal": 6,
+                    "type": "double"
+                },
+                {
+                    "name": "position_y",
+                    "ordinal": 7,
+                    "type": "double"
+                },
+                {
+                    "name": "position_z",
+                    "ordinal": 8,
+                    "type": "double"
+                },
+                {
+                    "name": "reserved0",
+                    "ordinal": 29,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "reserved1",
+                    "ordinal": 30,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "rotation_w",
+                    "ordinal": 12,
+                    "type": "float"
+                },
+                {
+                    "name": "rotation_x",
+                    "ordinal": 9,
+                    "type": "float"
+                },
+                {
+                    "name": "rotation_y",
+                    "ordinal": 10,
+                    "type": "float"
+                },
+                {
+                    "name": "rotation_z",
+                    "ordinal": 11,
+                    "type": "float"
+                },
+                {
+                    "name": "source_revision",
+                    "ordinal": 3,
+                    "type": "uint64_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_fragment_descriptor",
+            "type": "struct v3_fragment_descriptor"
+        },
+        {
+            "kind": "record",
+            "name": "v3_joint_handle",
+            "fields": [
+                {
+                    "name": "generation",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "logical_id",
+                    "ordinal": 0,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "reserved",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_joint_handle",
+            "type": "struct v3_joint_handle"
+        },
+        {
+            "kind": "record",
+            "name": "v3_kinematic_target",
+            "fields": [
+                {
+                    "name": "flags",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "generation",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "logical_id",
+                    "ordinal": 0,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "position_x",
+                    "ordinal": 3,
+                    "type": "double"
+                },
+                {
+                    "name": "position_y",
+                    "ordinal": 4,
+                    "type": "double"
+                },
+                {
+                    "name": "position_z",
+                    "ordinal": 5,
+                    "type": "double"
+                },
+                {
+                    "name": "rotation_w",
+                    "ordinal": 9,
+                    "type": "float"
+                },
+                {
+                    "name": "rotation_x",
+                    "ordinal": 6,
+                    "type": "float"
+                },
+                {
+                    "name": "rotation_y",
+                    "ordinal": 7,
+                    "type": "float"
+                },
+                {
+                    "name": "rotation_z",
+                    "ordinal": 8,
+                    "type": "float"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_kinematic_target",
+            "type": "struct v3_kinematic_target"
+        },
+        {
+            "kind": "record",
+            "name": "v3_mass_properties",
+            "fields": [
+                {
+                    "name": "center_x",
+                    "ordinal": 1,
+                    "type": "float"
+                },
+                {
+                    "name": "center_y",
+                    "ordinal": 2,
+                    "type": "float"
+                },
+                {
+                    "name": "center_z",
+                    "ordinal": 3,
+                    "type": "float"
+                },
+                {
+                    "name": "inertia_xx",
+                    "ordinal": 4,
+                    "type": "float"
+                },
+                {
+                    "name": "inertia_xy",
+                    "ordinal": 7,
+                    "type": "float"
+                },
+                {
+                    "name": "inertia_xz",
+                    "ordinal": 8,
+                    "type": "float"
+                },
+                {
+                    "name": "inertia_yy",
+                    "ordinal": 5,
+                    "type": "float"
+                },
+                {
+                    "name": "inertia_yz",
+                    "ordinal": 9,
+                    "type": "float"
+                },
+                {
+                    "name": "inertia_zz",
+                    "ordinal": 6,
+                    "type": "float"
+                },
+                {
+                    "name": "mass",
+                    "ordinal": 0,
+                    "type": "float"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_mass_properties",
+            "type": "struct v3_mass_properties"
+        },
+        {
+            "kind": "record",
+            "name": "v3_query",
+            "fields": [
+                {
+                    "name": "half_extent_x",
+                    "ordinal": 4,
+                    "type": "float"
+                },
+                {
+                    "name": "half_extent_y",
+                    "ordinal": 5,
+                    "type": "float"
+                },
+                {
+                    "name": "half_extent_z",
+                    "ordinal": 6,
+                    "type": "float"
+                },
+                {
+                    "name": "origin_x",
+                    "ordinal": 1,
+                    "type": "double"
+                },
+                {
+                    "name": "origin_y",
+                    "ordinal": 2,
+                    "type": "double"
+                },
+                {
+                    "name": "origin_z",
+                    "ordinal": 3,
+                    "type": "double"
+                },
+                {
+                    "name": "query_id",
+                    "ordinal": 0,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "reserved",
+                    "ordinal": 10,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "translation_x",
+                    "ordinal": 7,
+                    "type": "float"
+                },
+                {
+                    "name": "translation_y",
+                    "ordinal": 8,
+                    "type": "float"
+                },
+                {
+                    "name": "translation_z",
+                    "ordinal": 9,
+                    "type": "float"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_query",
+            "type": "struct v3_query"
+        },
+        {
+            "kind": "record",
+            "name": "v3_query_result",
+            "fields": [
+                {
+                    "name": "fraction",
+                    "ordinal": 4,
+                    "type": "float"
+                },
+                {
+                    "name": "hit_logical_id",
+                    "ordinal": 3,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "query_id",
+                    "ordinal": 0,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "reserved",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "reserved2",
+                    "ordinal": 5,
+                    "type": "float"
+                },
+                {
+                    "name": "status",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_query_result",
+            "type": "struct v3_query_result"
+        },
+        {
+            "kind": "record",
+            "name": "v3_removed_cell",
+            "fields": [
+                {
+                    "name": "feature_id",
+                    "ordinal": 1,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "source_body",
+                    "ordinal": 0,
+                    "type": "v3_body_handle"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_removed_cell",
+            "type": "struct v3_removed_cell"
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_status",
+            "type": "uint32_t"
+        },
+        {
+            "kind": "record",
+            "name": "v3_step_stats",
+            "fields": [
+                {
+                    "name": "body_count",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "collide_milliseconds",
+                    "ordinal": 13,
+                    "type": "float"
+                },
+                {
+                    "name": "contact_count",
+                    "ordinal": 3,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "created_body_count",
+                    "ordinal": 6,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "destroyed_body_count",
+                    "ordinal": 7,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "dynamic_tree_height",
+                    "ordinal": 16,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "fixed_step_count",
+                    "ordinal": 10,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "graph_overflow_constraint_count",
+                    "ordinal": 19,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "heap_move_pair_count",
+                    "ordinal": 20,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "joint_count",
+                    "ordinal": 11,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "mutation_batch_count",
+                    "ordinal": 5,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "output_count",
+                    "ordinal": 0,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "pair_milliseconds",
+                    "ordinal": 12,
+                    "type": "float"
+                },
+                {
+                    "name": "query_count",
+                    "ordinal": 9,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "query_output_count",
+                    "ordinal": 8,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "sat_cache_hit_count",
+                    "ordinal": 18,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "sat_call_count",
+                    "ordinal": 17,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "shape_count",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "solve_milliseconds",
+                    "ordinal": 14,
+                    "type": "float"
+                },
+                {
+                    "name": "static_tree_height",
+                    "ordinal": 15,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "step_milliseconds",
+                    "ordinal": 4,
+                    "type": "float"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_step_stats",
+            "type": "struct v3_step_stats"
+        },
+        {
+            "kind": "record",
+            "name": "v3_terrain_box",
+            "fields": [
+                {
+                    "name": "center_x",
+                    "ordinal": 0,
+                    "type": "float"
+                },
+                {
+                    "name": "center_y",
+                    "ordinal": 1,
+                    "type": "float"
+                },
+                {
+                    "name": "center_z",
+                    "ordinal": 2,
+                    "type": "float"
+                },
+                {
+                    "name": "feature_id",
+                    "ordinal": 8,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "friction",
+                    "ordinal": 6,
+                    "type": "float"
+                },
+                {
+                    "name": "half_extent_x",
+                    "ordinal": 3,
+                    "type": "float"
+                },
+                {
+                    "name": "half_extent_y",
+                    "ordinal": 4,
+                    "type": "float"
+                },
+                {
+                    "name": "half_extent_z",
+                    "ordinal": 5,
+                    "type": "float"
+                },
+                {
+                    "name": "reserved",
+                    "ordinal": 7,
+                    "type": "uint32_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_terrain_box",
+            "type": "struct v3_terrain_box"
+        },
+        {
+            "kind": "record",
+            "name": "v3_terrain_section_command",
+            "fields": [
+                {
+                    "name": "detail_box_count",
+                    "ordinal": 5,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "detail_box_offset",
+                    "ordinal": 4,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "generation",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "logical_id",
+                    "ordinal": 0,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "origin_x",
+                    "ordinal": 7,
+                    "type": "double"
+                },
+                {
+                    "name": "origin_y",
+                    "ordinal": 8,
+                    "type": "double"
+                },
+                {
+                    "name": "origin_z",
+                    "ordinal": 9,
+                    "type": "double"
+                },
+                {
+                    "name": "reserved",
+                    "ordinal": 6,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "voxel_run_count",
+                    "ordinal": 3,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "voxel_run_offset",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_terrain_section_command",
+            "type": "struct v3_terrain_section_command"
+        },
+        {
+            "kind": "record",
+            "name": "v3_transform",
+            "fields": [
+                {
+                    "name": "angular_velocity_x",
+                    "ordinal": 13,
+                    "type": "float"
+                },
+                {
+                    "name": "angular_velocity_y",
+                    "ordinal": 14,
+                    "type": "float"
+                },
+                {
+                    "name": "angular_velocity_z",
+                    "ordinal": 15,
+                    "type": "float"
+                },
+                {
+                    "name": "flags",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "generation",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "linear_velocity_x",
+                    "ordinal": 10,
+                    "type": "float"
+                },
+                {
+                    "name": "linear_velocity_y",
+                    "ordinal": 11,
+                    "type": "float"
+                },
+                {
+                    "name": "linear_velocity_z",
+                    "ordinal": 12,
+                    "type": "float"
+                },
+                {
+                    "name": "local_center_x",
+                    "ordinal": 16,
+                    "type": "float"
+                },
+                {
+                    "name": "local_center_y",
+                    "ordinal": 17,
+                    "type": "float"
+                },
+                {
+                    "name": "local_center_z",
+                    "ordinal": 18,
+                    "type": "float"
+                },
+                {
+                    "name": "logical_id",
+                    "ordinal": 0,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "position_x",
+                    "ordinal": 3,
+                    "type": "double"
+                },
+                {
+                    "name": "position_y",
+                    "ordinal": 4,
+                    "type": "double"
+                },
+                {
+                    "name": "position_z",
+                    "ordinal": 5,
+                    "type": "double"
+                },
+                {
+                    "name": "reserved",
+                    "ordinal": 19,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "rotation_w",
+                    "ordinal": 9,
+                    "type": "float"
+                },
+                {
+                    "name": "rotation_x",
+                    "ordinal": 6,
+                    "type": "float"
+                },
+                {
+                    "name": "rotation_y",
+                    "ordinal": 7,
+                    "type": "float"
+                },
+                {
+                    "name": "rotation_z",
+                    "ordinal": 8,
+                    "type": "float"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_transform",
+            "type": "struct v3_transform"
+        },
+        {
+            "kind": "record",
+            "name": "v3_voxel_run",
+            "fields": [
+                {
+                    "name": "packed",
+                    "ordinal": 0,
+                    "type": "uint32_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_voxel_run",
+            "type": "struct v3_voxel_run"
+        },
+        {
+            "kind": "opaque",
+            "name": "v3_world"
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_world",
+            "type": "struct v3_world"
+        },
+        {
+            "kind": "function",
+            "name": "v3_world_create",
+            "type": "v3_world *(double, double, double)",
+            "parameters": [
+                {
+                    "name": "gravity_x",
+                    "ordinal": 0,
+                    "type": "double"
+                },
+                {
+                    "name": "gravity_y",
+                    "ordinal": 1,
+                    "type": "double"
+                },
+                {
+                    "name": "gravity_z",
+                    "ordinal": 2,
+                    "type": "double"
+                }
+            ]
+        },
+        {
+            "kind": "function",
+            "name": "v3_world_create_hull_body",
+            "type": "v3_status (v3_world *, const v3_box_body_command *, const float *, uint32_t)",
+            "parameters": [
+                {
+                    "name": "world",
+                    "ordinal": 0,
+                    "type": "v3_world *"
+                },
+                {
+                    "name": "command",
+                    "ordinal": 1,
+                    "type": "const v3_box_body_command *"
+                },
+                {
+                    "name": "point_xyz",
+                    "ordinal": 2,
+                    "type": "const float *"
+                },
+                {
+                    "name": "point_count",
+                    "ordinal": 3,
+                    "type": "uint32_t"
+                }
+            ]
+        },
+        {
+            "kind": "function",
+            "name": "v3_world_create_voxel_group",
+            "type": "v3_status (v3_world *, const v3_box_body_command *, const v3_terrain_box *, uint32_t, const v3_mass_properties *)",
+            "parameters": [
+                {
+                    "name": "world",
+                    "ordinal": 0,
+                    "type": "v3_world *"
+                },
+                {
+                    "name": "command",
+                    "ordinal": 1,
+                    "type": "const v3_box_body_command *"
+                },
+                {
+                    "name": "boxes",
+                    "ordinal": 2,
+                    "type": "const v3_terrain_box *"
+                },
+                {
+                    "name": "box_count",
+                    "ordinal": 3,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "mass_properties",
+                    "ordinal": 4,
+                    "type": "const v3_mass_properties *"
+                }
+            ]
+        },
+        {
+            "kind": "function",
+            "name": "v3_world_destroy",
+            "type": "void (v3_world *)",
+            "parameters": [
+                {
+                    "name": "world",
+                    "ordinal": 0,
+                    "type": "v3_world *"
+                }
+            ]
+        },
+        {
+            "kind": "function",
+            "name": "v3_world_replace_box_bodies",
+            "type": "v3_status (v3_world *, const v3_body_handle *, uint32_t, const v3_box_body_command *, uint32_t)",
+            "parameters": [
+                {
+                    "name": "world",
+                    "ordinal": 0,
+                    "type": "v3_world *"
+                },
+                {
+                    "name": "removals",
+                    "ordinal": 1,
+                    "type": "const v3_body_handle *"
+                },
+                {
+                    "name": "removal_count",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "creations",
+                    "ordinal": 3,
+                    "type": "const v3_box_body_command *"
+                },
+                {
+                    "name": "creation_count",
+                    "ordinal": 4,
+                    "type": "uint32_t"
+                }
+            ]
+        },
+        {
+            "kind": "function",
+            "name": "v3_world_replace_distance_joints",
+            "type": "v3_status (v3_world *, const v3_joint_handle *, uint32_t, const v3_distance_joint_command *, uint32_t)",
+            "parameters": [
+                {
+                    "name": "world",
+                    "ordinal": 0,
+                    "type": "v3_world *"
+                },
+                {
+                    "name": "removals",
+                    "ordinal": 1,
+                    "type": "const v3_joint_handle *"
+                },
+                {
+                    "name": "removal_count",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "creations",
+                    "ordinal": 3,
+                    "type": "const v3_distance_joint_command *"
+                },
+                {
+                    "name": "creation_count",
+                    "ordinal": 4,
+                    "type": "uint32_t"
+                }
+            ]
+        },
+        {
+            "kind": "function",
+            "name": "v3_world_replace_terrain_sections",
+            "type": "v3_status (v3_world *, const v3_body_handle *, uint32_t, const v3_terrain_section_command *, uint32_t, const v3_voxel_run *, uint32_t, const v3_terrain_box *, uint32_t)",
+            "parameters": [
+                {
+                    "name": "world",
+                    "ordinal": 0,
+                    "type": "v3_world *"
+                },
+                {
+                    "name": "removals",
+                    "ordinal": 1,
+                    "type": "const v3_body_handle *"
+                },
+                {
+                    "name": "removal_count",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "sections",
+                    "ordinal": 3,
+                    "type": "const v3_terrain_section_command *"
+                },
+                {
+                    "name": "section_count",
+                    "ordinal": 4,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "voxel_runs",
+                    "ordinal": 5,
+                    "type": "const v3_voxel_run *"
+                },
+                {
+                    "name": "voxel_run_count",
+                    "ordinal": 6,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "detail_boxes",
+                    "ordinal": 7,
+                    "type": "const v3_terrain_box *"
+                },
+                {
+                    "name": "detail_box_count",
+                    "ordinal": 8,
+                    "type": "uint32_t"
+                }
+            ]
+        },
+        {
+            "kind": "function",
+            "name": "v3_world_step_and_read",
+            "type": "v3_status (v3_world *, const v3_kinematic_target *, uint32_t, const v3_body_wrench *, uint32_t, const v3_query *, uint32_t, uint32_t, v3_transform *, uint32_t, v3_query_result *, uint32_t, v3_step_stats *)",
+            "parameters": [
+                {
+                    "name": "world",
+                    "ordinal": 0,
+                    "type": "v3_world *"
+                },
+                {
+                    "name": "targets",
+                    "ordinal": 1,
+                    "type": "const v3_kinematic_target *"
+                },
+                {
+                    "name": "target_count",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "wrenches",
+                    "ordinal": 3,
+                    "type": "const v3_body_wrench *"
+                },
+                {
+                    "name": "wrench_count",
+                    "ordinal": 4,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "queries",
+                    "ordinal": 5,
+                    "type": "const v3_query *"
+                },
+                {
+                    "name": "query_count",
+                    "ordinal": 6,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "fixed_step_count",
+                    "ordinal": 7,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "transforms",
+                    "ordinal": 8,
+                    "type": "v3_transform *"
+                },
+                {
+                    "name": "transform_capacity",
+                    "ordinal": 9,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "query_results",
+                    "ordinal": 10,
+                    "type": "v3_query_result *"
+                },
+                {
+                    "name": "query_result_capacity",
+                    "ordinal": 11,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "stats",
+                    "ordinal": 12,
+                    "type": "v3_step_stats *"
+                }
+            ]
+        }
+    ]
+}

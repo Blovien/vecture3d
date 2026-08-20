@@ -1,0 +1,128 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'de.infolektuell.jextract' version '1.4.0'
+}
+
+java {
+    withSourcesJar()
+}
+
+base {
+    archivesName = 'vecture3d-ffi'
+}
+
+tasks.named('sourcesJar', Jar) {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.12.2'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.12.2'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+}
+
+def nativeLibraryFile = rootProject.file("build/v3-release/bin/${System.mapLibraryName('vecture3d')}")
+def nativeFixtureBuildDirectory = layout.buildDirectory.dir('native-test')
+def mismatchLibraryFile = layout.buildDirectory.file("native-test/bin/${System.mapLibraryName('vecture3d_mismatch')}")
+def nullWorldLibraryFile = layout.buildDirectory.file("native-test/bin/${System.mapLibraryName('vecture3d_null_world')}")
+
+def configureV3Native = tasks.register('configureV3Native', Exec) {
+    workingDir rootProject.projectDir
+    commandLine 'cmake', '--preset', 'v3-release', '-DBOX3D_SAMPLES=OFF'
+}
+
+def buildV3Native = tasks.register('buildV3Native', Exec) {
+    dependsOn configureV3Native
+    workingDir rootProject.projectDir
+    commandLine 'cmake', '--build', '--preset', 'v3-release', '--target', 'vecture3d_native', '--parallel', '2'
+}
+
+def configureNativeFixtures = tasks.register('configureNativeFixtures', Exec) {
+    inputs.file layout.projectDirectory.file('src/test/native/CMakeLists.txt')
+    outputs.file(nativeFixtureBuildDirectory.map { it.file('CMakeCache.txt') })
+    doFirst {
+        nativeFixtureBuildDirectory.get().asFile.mkdirs()
+    }
+    commandLine 'cmake',
+        '-S', layout.projectDirectory.dir('src/test/native').asFile.absolutePath,
+        '-B', nativeFixtureBuildDirectory.get().asFile.absolutePath,
+        '-G', 'Ninja',
+        '-DCMAKE_BUILD_TYPE=Release'
+}
+
+def buildNativeFixtures = tasks.register('buildNativeFixtures', Exec) {
+    dependsOn configureNativeFixtures
+    inputs.files(
+        fileTree('src/test/native') { include '*.c' },
+        fileTree('src/main/public') { include '*.h' }
+    )
+    outputs.files(mismatchLibraryFile, nullWorldLibraryFile)
+    commandLine 'cmake', '--build', nativeFixtureBuildDirectory.get().asFile.absolutePath, '--parallel', '2'
+}
+
+tasks.named('test') {
+    dependsOn buildV3Native, buildNativeFixtures
+    inputs.file nativeLibraryFile
+    inputs.file mismatchLibraryFile
+    inputs.file nullWorldLibraryFile
+    systemProperty 'v3.native.library', nativeLibraryFile.absolutePath
+    systemProperty 'v3.mismatch.library', mismatchLibraryFile.get().asFile.absolutePath
+    systemProperty 'v3.null-world.library', nullWorldLibraryFile.get().asFile.absolutePath
+    systemProperty 'v3.test.classpath', sourceSets.test.runtimeClasspath.asPath
+}
+
+publishing {
+    publications {
+        create('mavenJava', MavenPublication) {
+            from components.java
+            artifactId = 'vecture3d-ffi'
+        }
+    }
+    repositories {
+        maven {
+            name = 'verification'
+            url = layout.buildDirectory.dir('test-repository')
+        }
+    }
+}
+
+def consumerDirectory = layout.projectDirectory.dir('src/test/consumer')
+
+tasks.register('verifyPublishedConsumer', Exec) { Exec consumerVerification ->
+    group = 'verification'
+    description = 'Publishes and tests a clean Java 25 consumer without applying Jextract.'
+    dependsOn buildV3Native, 'publishMavenJavaPublicationToVerificationRepository'
+    workingDir rootProject.projectDir
+    consumerVerification.doFirst {
+        List<String> arguments = [
+            '--no-daemon',
+            '--project-dir', consumerDirectory.asFile.absolutePath,
+            "-Pv3Repository=${layout.buildDirectory.dir('test-repository').get().asFile.absolutePath}",
+            "-Pv3NativeLibrary=${nativeLibraryFile.absolutePath}",
+            'test',
+            '--rerun-tasks',
+            '--console=plain'
+        ]
+        if (System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('windows')) {
+            consumerVerification.commandLine(['cmd', '/c', rootProject.file('gradlew.bat').absolutePath] + arguments)
+        } else {
+            consumerVerification.commandLine([rootProject.file('gradlew').absolutePath] + arguments)
+        }
+    }
+}
+
+jextract.libraries {
+    def v3 = register('v3') {
+        header = layout.projectDirectory.file('src/main/public/v3_abi.h')
+        headerClassName = 'V3Abi'
+        targetPackage = 'dev.hytalemodding.vecture3d.ffi.generated'
+    }
+    sourceSets.main {
+        jextract.libraries.addLater(v3)
+    }
+}

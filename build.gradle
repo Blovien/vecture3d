@@ -1,0 +1,27 @@
+plugins {
+    id 'java'
+}
+
+group = 'dev.hytalemodding'
+version = '0.1.0-SNAPSHOT'
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(java_version as Integer)
+}
+
+subprojects {
+    group = rootProject.group
+    version = rootProject.version
+
+    repositories {
+        mavenCentral()
+    }
+
+    plugins.withType(JavaPlugin).configureEach {
+        java {
+            toolchain.languageVersion = JavaLanguageVersion.of(rootProject.java_version as Integer)
+        }
+    }
+}
+
+apply from: 'gradle/abi-manifest.gradle'
