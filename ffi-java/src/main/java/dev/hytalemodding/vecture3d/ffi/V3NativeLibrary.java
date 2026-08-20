@@ -5,13 +5,14 @@ import java.lang.foreign.MemorySegment;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.Properties;
 
 import dev.hytalemodding.vecture3d.ffi.generated.V3Abi;
 
 public final class V3NativeLibrary {
-    private static final Object LOAD_LOCK = new Object();
+    private static final String PROCESS_PATH_KEY = "dev.hytalemodding.vecture3d.ffi.native.path";
+    private static final String PROCESS_LOADER_KEY = "dev.hytalemodding.vecture3d.ffi.native.loader";
 
-    private static Path loadedPath;
     private static V3NativeLibrary loadedLibrary;
 
     private V3NativeLibrary() {
@@ -22,24 +23,42 @@ public final class V3NativeLibrary {
      */
     public static V3NativeLibrary load(Path path) {
         Path realPath = validatePath(path);
-        synchronized (LOAD_LOCK) {
-            if (loadedLibrary != null) {
-                if (!loadedPath.equals(realPath)) {
-                    throw new IllegalStateException("Vecture3D is already loaded from " + loadedPath);
+        Properties processState = System.getProperties();
+        ClassLoader definingLoader = V3NativeLibrary.class.getClassLoader();
+        synchronized (processState) {
+            Object admittedPath = processState.get(PROCESS_PATH_KEY);
+            Object admittedLoader = processState.get(PROCESS_LOADER_KEY);
+            if (admittedPath != null || admittedLoader != null) {
+                if (!(admittedPath instanceof String pathValue)
+                    || !(admittedLoader instanceof ClassLoader loaderValue)) {
+                    throw new IllegalStateException("Vecture3D process admission state is invalid");
+                }
+                if (loaderValue != definingLoader) {
+                    throw new IllegalStateException(
+                        "Vecture3D must be loaded once from a shared parent classloader"
+                    );
+                }
+                if (!pathValue.equals(realPath.toString())) {
+                    throw new IllegalStateException("Vecture3D is already loaded from " + pathValue);
+                }
+                if (loadedLibrary == null) {
+                    throw new IllegalStateException("Vecture3D defining loader lost its admitted wrapper instance");
                 }
                 return loadedLibrary;
             }
 
             // NOTE: Jextract resolves loader symbols when its generated classes initialize
             System.load(realPath.toString());
-            int nativeVersion = V3Abi.v3_abi_version();
+            long nativeVersion = Integer.toUnsignedLong(V3Abi.v3_abi_version());
             long nativeHash = V3Abi.v3_abi_schema_hash();
-            if (nativeVersion != V3Abi.V3_ABI_VERSION() || nativeHash != V3Abi.V3_ABI_SCHEMA_HASH()) {
+            long expectedVersion = Integer.toUnsignedLong(V3Abi.V3_ABI_VERSION());
+            if (nativeVersion != expectedVersion || nativeHash != V3Abi.V3_ABI_SCHEMA_HASH()) {
                 throw new V3Exception(V3Exception.Kind.ABI_MISMATCH, "load", nativeVersion, nativeHash);
             }
 
-            loadedPath = realPath;
             loadedLibrary = new V3NativeLibrary();
+            processState.put(PROCESS_PATH_KEY, realPath.toString());
+            processState.put(PROCESS_LOADER_KEY, definingLoader);
             return loadedLibrary;
         }
     }
@@ -48,7 +67,8 @@ public final class V3NativeLibrary {
         requireGravity(gravityX, gravityY, gravityZ);
         MemorySegment nativeWorld = V3Abi.v3_world_create(gravityX, gravityY, gravityZ);
         if (nativeWorld.equals(MemorySegment.NULL)) {
-            throw new V3Exception(V3Exception.Kind.NATIVE_STATUS, "createWorld", V3Abi.V3_NATIVE_FAILURE(), 0);
+            long status = Integer.toUnsignedLong(V3Abi.V3_NATIVE_FAILURE());
+            throw new V3Exception(V3Exception.Kind.NATIVE_STATUS, "createWorld", status, 0);
         }
         try {
             return V3World.create(nativeWorld);
@@ -64,7 +84,7 @@ public final class V3NativeLibrary {
 
     static void requireSuccess(String operation, int status, long detail) {
         if (status != V3Abi.V3_OK()) {
-            throw new V3Exception(V3Exception.Kind.NATIVE_STATUS, operation, status, detail);
+            throw new V3Exception(V3Exception.Kind.NATIVE_STATUS, operation, Integer.toUnsignedLong(status), detail);
         }
     }
 

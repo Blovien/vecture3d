@@ -16,6 +16,7 @@ tasks.named('test') {
 
 def nativeLibraryFile = rootProject.file("build/v3-release/bin/${System.mapLibraryName('vecture3d')}")
 def mismatchLibraryFile = layout.buildDirectory.file("native-test/${System.mapLibraryName('vecture3d_mismatch')}")
+def nullWorldLibraryFile = layout.buildDirectory.file("native-test/${System.mapLibraryName('vecture3d_null_world')}")
 
 def configureV3Native = tasks.register('configureV3Native', Exec) {
     workingDir rootProject.projectDir
@@ -40,12 +41,29 @@ def buildMismatchNativeFixture = tasks.register('buildMismatchNativeFixture', Ex
         '-o', mismatchLibraryFile.get().asFile.absolutePath
 }
 
+def buildNullWorldNativeFixture = tasks.register('buildNullWorldNativeFixture', Exec) {
+    def source = layout.projectDirectory.file('src/test/native/v3_null_world.c')
+    def publicHeader = layout.projectDirectory.file('src/main/public/v3_abi.h')
+    def manifestHeader = layout.projectDirectory.file('src/main/public/v3_abi_manifest.h')
+    inputs.files source, publicHeader, manifestHeader
+    outputs.file nullWorldLibraryFile
+    doFirst {
+        nullWorldLibraryFile.get().asFile.parentFile.mkdirs()
+    }
+    commandLine providers.environmentVariable('CC').getOrElse('cc'),
+        '-std=c17', '-Wall', '-Wextra', '-Werror', '-shared', '-fPIC',
+        '-I', publicHeader.asFile.parentFile.absolutePath, source.asFile.absolutePath,
+        '-o', nullWorldLibraryFile.get().asFile.absolutePath
+}
+
 tasks.named('test') {
-    dependsOn buildV3Native, buildMismatchNativeFixture
+    dependsOn buildV3Native, buildMismatchNativeFixture, buildNullWorldNativeFixture
     inputs.file nativeLibraryFile
     inputs.file mismatchLibraryFile
+    inputs.file nullWorldLibraryFile
     systemProperty 'v3.native.library', nativeLibraryFile.absolutePath
     systemProperty 'v3.mismatch.library', mismatchLibraryFile.get().asFile.absolutePath
+    systemProperty 'v3.null-world.library', nullWorldLibraryFile.get().asFile.absolutePath
     systemProperty 'v3.test.classpath', sourceSets.test.runtimeClasspath.asPath
 }
 

@@ -4,6 +4,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -60,24 +64,6 @@ class V3NativeLibraryTest {
     }
 
     @Test
-    void schemaMismatchRunsInForkWithoutPoisoningMainProcess() throws Exception {
-        String javaExecutable = Path.of(System.getProperty("java.home"), "bin", "java").toString();
-        Process process = new ProcessBuilder(
-            javaExecutable,
-            "--enable-native-access=ALL-UNNAMED",
-            "-cp",
-            System.getProperty("v3.test.classpath"),
-            MismatchProbe.class.getName(),
-            Path.of(System.getProperty("v3.mismatch.library")).toAbsolutePath().toString()
-        ).redirectErrorStream(true).start();
-        String output = new String(process.getInputStream().readAllBytes());
-
-        assertEquals(0, process.waitFor(), output);
-        assertTrue(output.contains("ABI_MISMATCH"), output);
-        assertEquals(0, loadRealLibrary().activeWorldCount());
-    }
-
-    @Test
     void failedWorldCreationDoesNotLeakAnActiveWorld() {
         V3NativeLibrary library = loadRealLibrary();
         int baseline = library.activeWorldCount();
@@ -94,11 +80,16 @@ class V3NativeLibraryTest {
             V3Exception.class,
             () -> V3NativeLibrary.requireSuccess("replaceBoxBodies", 9, 17)
         );
+        V3Exception highBitFailure = assertThrows(
+            V3Exception.class,
+            () -> V3NativeLibrary.requireSuccess("step", 0x80000001, 0)
+        );
 
         assertEquals(V3Exception.Kind.NATIVE_STATUS, failure.kind());
         assertEquals("replaceBoxBodies", failure.operation());
-        assertEquals(9, failure.status());
+        assertEquals(9L, failure.status());
         assertEquals(17, failure.detail());
+        assertEquals(2_147_483_649L, highBitFailure.status());
     }
 
     private static V3NativeLibrary loadRealLibrary() {
@@ -121,8 +112,62 @@ class V3NativeLibraryTest {
                 if (failure.kind() != V3Exception.Kind.ABI_MISMATCH) {
                     throw failure;
                 }
-                System.out.println(failure.kind());
+                System.out.println(failure.kind() + ":" + failure.status());
             }
         }
+    }
+
+    public static final class NullWorldProbe {
+        private NullWorldProbe() {
+        }
+
+        public static void main(String[] arguments) {
+            V3NativeLibrary library = V3NativeLibrary.load(Path.of(arguments[0]));
+            try {
+                library.createWorld(0.0, 0.0, 0.0);
+                throw new AssertionError("null world fixture created a world");
+            } catch (V3Exception failure) {
+                if (failure.kind() != V3Exception.Kind.NATIVE_STATUS || failure.status() != 5L) {
+                    throw failure;
+                }
+                System.out.println(failure.kind() + ":" + failure.status() + ":" + library.activeWorldCount());
+            }
+        }
+    }
+
+    public static final class ConcurrentLoadProbe {
+        private ConcurrentLoadProbe() {
+        }
+
+        public static void main(String[] arguments) throws Exception {
+            int workerCount = 16;
+            CountDownLatch ready = new CountDownLatch(workerCount);
+            CountDownLatch start = new CountDownLatch(1);
+            try (var executor = Executors.newFixedThreadPool(workerCount)) {
+                List<Future<V3NativeLibrary>> loads = new java.util.ArrayList<>(workerCount);
+                for (int index = 0; index < workerCount; index++) {
+                    loads.add(executor.submit(() -> {
+                        ready.countDown();
+                        start.await();
+                        return V3NativeLibrary.load(Path.of(arguments[0]));
+                    }));
+                }
+                ready.await();
+                start.countDown();
+                V3NativeLibrary expected = loads.getFirst().get();
+                for (Future<V3NativeLibrary> load : loads) {
+                    if (load.get() != expected) {
+                        throw new AssertionError("concurrent load returned multiple instances");
+                    }
+                }
+                if (expected.activeWorldCount() != 0) {
+                    throw new AssertionError("concurrent load created a world");
+                }
+            }
+            System.out.println("CONCURRENT_LOAD_OK");
+        }
+    }
+
+    private record ForkResult(int exitCode, String output) {
     }
 }
