@@ -17,7 +17,7 @@ typedef struct v3_pending_body
 	uint32_t kind;
 } v3_pending_body;
 
-// TODO: prolly just enfore double precision inside box3d part
+// V3 exposes double world positions and must link to a double-precision Box3D build.
 _Static_assert( sizeof( b3Pos ) == 24, "V3 and Box3D must share double-precision world positions" );
 
 #if defined( V3_TESTING )

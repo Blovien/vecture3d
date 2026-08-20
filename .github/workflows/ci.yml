@@ -52,7 +52,7 @@ jobs:
         run: ${{ matrix.gradle }} checkAbiManifest --console=plain
 
       - name: Configure native build
-        run: cmake --preset v3-release --fresh
+        run: cmake --preset v3-release --fresh -DBOX3D_SAMPLES=OFF
 
       - name: Build native library and tests
         run: cmake --build --preset v3-release --parallel 2

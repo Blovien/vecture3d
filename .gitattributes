@@ -7,4 +7,7 @@
 *.txt text
 *.sh text eol=lf
 
+ffi-java/src/main/abi/v3_abi_manifest.json text eol=lf
+ffi-java/src/main/public/v3_abi_manifest.h text eol=lf
+
 *.ttf binary

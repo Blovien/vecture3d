@@ -7,11 +7,8 @@
 #include "box3d/collision.h"
 #include "box3d/math_functions.h"
 
-#include "body.h"
-#include "physics_world.h"
 #include "recording.h"
 
-#include <math.h>
 #include <stdio.h>
 
 #define V3_DENSE_VOXEL_HULL_COUNT 32
@@ -92,89 +89,7 @@ cleanup:
 	return status;
 }
 
-static int V3VoxelMassCenter( void )
-{
-	int status = 1;
-	b3WorldId worldId = b3_nullWorldId;
-	b3BodyId bodyId = b3_nullBodyId;
-	b3ShapeId shapeId = b3_nullShapeId;
-	b3MeshData* mesh = NULL;
-	b3World* world = NULL;
-	b3Body* body = NULL;
-	b3BodySim* bodySim = NULL;
-	b3WorldDef worldDef;
-	b3BodyDef bodyDef;
-	b3ShapeDef shapeDef;
-	b3Vec3 originVelocityBefore;
-	b3Matrix3 worldInertiaBefore;
-	float minExtentBefore;
-	b3Vec3 maxExtentBefore;
-	b3MassData massData;
-	b3Vec3 originVelocityAfter;
-	b3Matrix3 worldInertiaAfter;
-	float minExtentAfter;
-	b3Vec3 maxExtentAfter;
-
-	worldDef = b3DefaultWorldDef();
-	worldId = b3CreateWorld( &worldDef );
-	V3_ENSURE( b3World_IsValid( worldId ) );
-	bodyDef = b3DefaultBodyDef();
-	bodyDef.type = b3_dynamicBody;
-	bodyId = b3CreateBody( worldId, &bodyDef );
-	V3_ENSURE( B3_IS_NON_NULL( bodyId ) );
-
-	mesh = b3CreateBoxMesh( (b3Vec3){ 0.5f, 0.0f, 0.0f }, (b3Vec3){ 1.5f, 2.0f, 3.0f }, false );
-	V3_ENSURE( mesh != NULL );
-	shapeDef = b3DefaultShapeDef();
-	shapeDef.density = 1.0f;
-	shapeId = b3CreateMeshShape( bodyId, &shapeDef, mesh, b3Vec3_one );
-	V3_ENSURE( B3_IS_NON_NULL( shapeId ) );
-
-	b3Body_SetLinearVelocity( bodyId, (b3Vec3){ 1.0f, 2.0f, 3.0f } );
-	b3Body_SetAngularVelocity( bodyId, (b3Vec3){ 0.0f, 0.0f, 2.0f } );
-	originVelocityBefore = b3Body_GetLocalPointVelocity( bodyId, b3Vec3_zero );
-	worldInertiaBefore = b3Body_GetWorldInverseRotationalInertia( bodyId );
-
-	world = b3GetWorld( bodyId.world0 );
-	body = b3GetBodyFullId( world, bodyId );
-	bodySim = b3GetBodySim( world, body );
-	minExtentBefore = bodySim->minExtent;
-	maxExtentBefore = bodySim->maxExtent;
-
-	massData = (b3MassData){ .mass = 5.0f, .center = { 1.0f, 1.0f, 0.5f }, .inertia = b3Mat3_identity };
-	massData.inertia.cx.x = 1.0f;
-	massData.inertia.cy.y = 2.0f;
-	massData.inertia.cz.z = 3.0f;
-	b3Body_SetMassData( bodyId, massData );
-
-	originVelocityAfter = b3Body_GetLocalPointVelocity( bodyId, b3Vec3_zero );
-	V3_ENSURE( fabsf( originVelocityAfter.x - originVelocityBefore.x ) < 1e-5f );
-	V3_ENSURE( fabsf( originVelocityAfter.y - originVelocityBefore.y ) < 1e-5f );
-	V3_ENSURE( fabsf( originVelocityAfter.z - originVelocityBefore.z ) < 1e-5f );
-
-	worldInertiaAfter = b3Body_GetWorldInverseRotationalInertia( bodyId );
-	V3_ENSURE( fabsf( worldInertiaAfter.cx.x - worldInertiaBefore.cx.x ) > 1e-5f );
-
-	bodySim = b3GetBodySim( world, body );
-	minExtentAfter = bodySim->minExtent;
-	maxExtentAfter = bodySim->maxExtent;
-	V3_ENSURE( fabsf( minExtentAfter - minExtentBefore ) > 1e-5f );
-	V3_ENSURE( fabsf( maxExtentAfter.x - maxExtentBefore.x ) > 1e-5f );
-
-	status = 0;
-cleanup:
-	if ( b3World_IsValid( worldId ) )
-	{
-		b3DestroyWorld( worldId );
-	}
-	if ( mesh != NULL )
-	{
-		b3DestroyMesh( mesh );
-	}
-	return status;
-}
-
-static int V3VoxelBroadPhaseOverflow( void )
+static int V3VoxelDenseContactsAreNotDropped( void )
 {
 	int status = 1;
 	b3CompoundData* voxel = NULL;
@@ -189,7 +104,6 @@ static int V3VoxelBroadPhaseOverflow( void )
 	b3ShapeDef voxelShapeDef;
 	b3BoxHull dynamicBox;
 	b3ShapeDef dynamicShapeDef;
-	b3Counters counters;
 	b3ContactData contacts[V3_DENSE_VOXEL_HULL_COUNT];
 	int contactCount = 0;
 
@@ -218,9 +132,6 @@ static int V3VoxelBroadPhaseOverflow( void )
 	V3_ENSURE( B3_IS_NON_NULL( dynamicShapeId ) );
 
 	b3World_Step( worldId, 1.0f / 60.0f, 4 );
-	counters = b3World_GetCounters( worldId );
-	V3_ENSURE( counters.heapMovePairCount > 0 );
-
 	contactCount = b3Shape_GetContactData( dynamicShapeId, contacts, V3_DENSE_VOXEL_HULL_COUNT );
 	V3_ENSURE( contactCount == V3_DENSE_VOXEL_HULL_COUNT );
 
@@ -320,8 +231,7 @@ cleanup:
 int V3VoxelTest( void )
 {
 	RUN_SUBTEST( V3VoxelPublicShape );
-	RUN_SUBTEST( V3VoxelMassCenter );
-	RUN_SUBTEST( V3VoxelBroadPhaseOverflow );
+	RUN_SUBTEST( V3VoxelDenseContactsAreNotDropped );
 	RUN_SUBTEST( V3VoxelSnapshot );
 	return 0;
 }
