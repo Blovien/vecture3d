@@ -57,7 +57,6 @@ def parseSymbols = { String astJson, String headerText ->
         }
     }
 
-    Set<String> recordNames = nodes.findAll { it.kind == 'RecordDecl' }.collect { it.name } as Set<String>
     List<Map> symbols = []
 
     nodes.each { Map node ->
@@ -83,7 +82,7 @@ def parseSymbols = { String astJson, String headerText ->
                     name: node.name
                 ] as LinkedHashMap)
             }
-        } else if (node.kind == 'TypedefDecl' && !recordNames.contains(node.name)) {
+        } else if (node.kind == 'TypedefDecl') {
             symbols.add([
                 kind: 'typedef',
                 name: node.name,
@@ -112,12 +111,16 @@ def parseSymbols = { String astJson, String headerText ->
         byName != 0 ? byName : left.kind <=> right.kind
     }
 
-    Set<String> duplicates = symbols.groupBy { it.name }
+    Set<List<String>> duplicateKeys = symbols
+            .groupBy { symbol -> [symbol.name, symbol.kind] }
             .findAll { ignored, entries -> entries.size() > 1 }
-            .keySet() as Set<String>
-
-    if (!duplicates.isEmpty()) {
-        throw new GradleException("Duplicate public ABI symbols: ${duplicates.sort().join(', ')}")
+            .keySet() as Set<List<String>>
+    if (!duplicateKeys.isEmpty()) {
+        String duplicates = duplicateKeys
+                .collect { key -> "${key[0]} (${key[1]})" }
+                .sort()
+                .join(', ')
+        throw new GradleException("Duplicate public ABI symbols: ${duplicates}")
     }
 
     symbols
@@ -211,6 +214,24 @@ def generateManifest = { Path manifestPath, Path manifestHeaderPath ->
     logger.lifecycle("V3 ABI schema hash: 0x${hashHex}")
 }
 
+def assertManifestPreservesRecordTypedefPair = { Path manifestPath ->
+    Map manifest = new JsonSlurper().parseText(
+        Files.readString(manifestPath, StandardCharsets.UTF_8)
+    ) as Map
+    String symbolName = 'v3_body_handle'
+    boolean hasRecord = (manifest.symbols ?: []).any { Map symbol ->
+        symbol.name == symbolName && symbol.kind == 'record'
+    }
+    boolean hasTypedef = (manifest.symbols ?: []).any { Map symbol ->
+        symbol.name == symbolName && symbol.kind == 'typedef'
+    }
+    if (!hasRecord || !hasTypedef) {
+        throw new GradleException(
+            "ABI manifest regression: ${symbolName} must retain both record and typedef declarations"
+        )
+    }
+}
+
 tasks.register('updateAbiManifest') {
     group = 'build setup'
     description = 'Regenerates the checked-in V3 ABI manifest and hash header.'
@@ -234,6 +255,7 @@ tasks.register('checkAbiManifest') {
         Path temporaryManifest = temporaryDirectory.resolve('v3_abi_manifest.json')
         Path temporaryHeader = temporaryDirectory.resolve('v3_abi_manifest.h')
         generateManifest(temporaryManifest, temporaryHeader)
+        assertManifestPreservesRecordTypedefPair(temporaryManifest)
 
         if (Files.mismatch(checkedManifest, temporaryManifest) != -1L) {
             throw new GradleException('v3_abi_manifest.json is stale; run ./gradlew updateAbiManifest')

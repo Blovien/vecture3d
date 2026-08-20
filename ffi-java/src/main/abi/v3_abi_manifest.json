@@ -276,6 +276,11 @@
             ]
         },
         {
+            "kind": "typedef",
+            "name": "v3_block_box",
+            "type": "struct v3_block_box"
+        },
+        {
             "kind": "record",
             "name": "v3_block_cell",
             "fields": [
@@ -315,6 +320,11 @@
                     "type": "int32_t"
                 }
             ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_block_cell",
+            "type": "struct v3_block_cell"
         },
         {
             "kind": "record",
@@ -403,6 +413,11 @@
             ]
         },
         {
+            "kind": "typedef",
+            "name": "v3_block_contact_event",
+            "type": "struct v3_block_contact_event"
+        },
+        {
             "kind": "record",
             "name": "v3_block_field_command",
             "fields": [
@@ -449,6 +464,11 @@
             ]
         },
         {
+            "kind": "typedef",
+            "name": "v3_block_field_command",
+            "type": "struct v3_block_field_command"
+        },
+        {
             "kind": "record",
             "name": "v3_block_material",
             "fields": [
@@ -488,6 +508,11 @@
                     "type": "float"
                 }
             ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_block_material",
+            "type": "struct v3_block_material"
         },
         {
             "kind": "record",
@@ -586,6 +611,11 @@
             ]
         },
         {
+            "kind": "typedef",
+            "name": "v3_body_definition",
+            "type": "struct v3_body_definition"
+        },
+        {
             "kind": "record",
             "name": "v3_body_handle",
             "fields": [
@@ -605,6 +635,11 @@
                     "type": "uint32_t"
                 }
             ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_body_handle",
+            "type": "struct v3_body_handle"
         },
         {
             "kind": "record",
@@ -656,6 +691,11 @@
                     "type": "float"
                 }
             ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_body_wrench",
+            "type": "struct v3_body_wrench"
         },
         {
             "kind": "record",
@@ -784,6 +824,11 @@
             ]
         },
         {
+            "kind": "typedef",
+            "name": "v3_box_body_command",
+            "type": "struct v3_box_body_command"
+        },
+        {
             "kind": "record",
             "name": "v3_distance_joint_command",
             "fields": [
@@ -885,6 +930,11 @@
             ]
         },
         {
+            "kind": "typedef",
+            "name": "v3_distance_joint_command",
+            "type": "struct v3_distance_joint_command"
+        },
+        {
             "kind": "record",
             "name": "v3_field_revision",
             "fields": [
@@ -899,6 +949,11 @@
                     "type": "uint64_t"
                 }
             ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_field_revision",
+            "type": "struct v3_field_revision"
         },
         {
             "kind": "record",
@@ -920,6 +975,11 @@
                     "type": "uint32_t"
                 }
             ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_fracture_plan_handle",
+            "type": "struct v3_fracture_plan_handle"
         },
         {
             "kind": "record",
@@ -966,6 +1026,11 @@
                     "type": "uint32_t"
                 }
             ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_fracture_plan_summary",
+            "type": "struct v3_fracture_plan_summary"
         },
         {
             "kind": "record",
@@ -1044,6 +1109,11 @@
             ]
         },
         {
+            "kind": "typedef",
+            "name": "v3_fracture_trigger",
+            "type": "struct v3_fracture_trigger"
+        },
+        {
             "kind": "record",
             "name": "v3_fragment_assignment",
             "fields": [
@@ -1063,6 +1133,11 @@
                     "type": "uint32_t"
                 }
             ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_fragment_assignment",
+            "type": "struct v3_fragment_assignment"
         },
         {
             "kind": "record",
@@ -1226,6 +1301,11 @@
             ]
         },
         {
+            "kind": "typedef",
+            "name": "v3_fragment_descriptor",
+            "type": "struct v3_fragment_descriptor"
+        },
+        {
             "kind": "record",
             "name": "v3_joint_handle",
             "fields": [
@@ -1245,6 +1325,11 @@
                     "type": "uint32_t"
                 }
             ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_joint_handle",
+            "type": "struct v3_joint_handle"
         },
         {
             "kind": "record",
@@ -1303,6 +1388,11 @@
             ]
         },
         {
+            "kind": "typedef",
+            "name": "v3_kinematic_target",
+            "type": "struct v3_kinematic_target"
+        },
+        {
             "kind": "record",
             "name": "v3_mass_properties",
             "fields": [
@@ -1357,6 +1447,11 @@
                     "type": "float"
                 }
             ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_mass_properties",
+            "type": "struct v3_mass_properties"
         },
         {
             "kind": "record",
@@ -1420,6 +1515,11 @@
             ]
         },
         {
+            "kind": "typedef",
+            "name": "v3_query",
+            "type": "struct v3_query"
+        },
+        {
             "kind": "record",
             "name": "v3_query_result",
             "fields": [
@@ -1456,6 +1556,11 @@
             ]
         },
         {
+            "kind": "typedef",
+            "name": "v3_query_result",
+            "type": "struct v3_query_result"
+        },
+        {
             "kind": "record",
             "name": "v3_removed_cell",
             "fields": [
@@ -1470,6 +1575,11 @@
                     "type": "v3_body_handle"
                 }
             ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_removed_cell",
+            "type": "struct v3_removed_cell"
         },
         {
             "kind": "typedef",
@@ -1588,6 +1698,11 @@
             ]
         },
         {
+            "kind": "typedef",
+            "name": "v3_step_stats",
+            "type": "struct v3_step_stats"
+        },
+        {
             "kind": "record",
             "name": "v3_terrain_box",
             "fields": [
@@ -1637,6 +1752,11 @@
                     "type": "uint32_t"
                 }
             ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_terrain_box",
+            "type": "struct v3_terrain_box"
         },
         {
             "kind": "record",
@@ -1693,6 +1813,11 @@
                     "type": "uint32_t"
                 }
             ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_terrain_section_command",
+            "type": "struct v3_terrain_section_command"
         },
         {
             "kind": "record",
@@ -1801,6 +1926,11 @@
             ]
         },
         {
+            "kind": "typedef",
+            "name": "v3_transform",
+            "type": "struct v3_transform"
+        },
+        {
             "kind": "record",
             "name": "v3_voxel_run",
             "fields": [
@@ -1812,8 +1942,18 @@
             ]
         },
         {
+            "kind": "typedef",
+            "name": "v3_voxel_run",
+            "type": "struct v3_voxel_run"
+        },
+        {
             "kind": "opaque",
             "name": "v3_world"
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_world",
+            "type": "struct v3_world"
         },
         {
             "kind": "function",
