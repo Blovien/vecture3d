@@ -147,5 +147,6 @@ LLMs are used in the following areas:
 - build configuration
 - code reviews
 - benchmarking
+- (vecture3d) abi commands in java ffi
 
-Elsewhere all code is developed and written by me. I take responsibility for every line of code in Box2D/3D.
+Elsewhere all code is developed and written by me. I take responsibility for every line of code in Vecture3D.
