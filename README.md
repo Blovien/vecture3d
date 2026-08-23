@@ -1,51 +1,15 @@
 # Vecture3D
 
-[![Build Status](https://github.com/erincatto/box3d/actions/workflows/build.yml/badge.svg)](https://github.com/erincatto/box3d/actions)
-[![CLA assistant](https://cla-assistant.io/readme/badge/erincatto/box3d)](https://cla-assistant.io/erincatto/box3d)
+[![Build Status](https://github.com/blovien/vecture3d/actions/workflows/build.yml/badge.svg)](https://github.com/blovien/vecture3d/actions)
+[![CLA assistant](https://cla-assistant.io/readme/badge/blovien/vecture3d)](https://cla-assistant.io/blovien/vecture3d)
 
 ![Box3D Logo](https://box2d.org/images/logo.svg)
 
-Vecture3D is a fork of Box3D physics engine designed and optimized for Hytale Server.
-
-[![Introducing Box3D](https://img.youtube.com/vi/jr_Fzl2XwKU/maxresdefault.jpg)](https://www.youtube.com/watch?v=jr_Fzl2XwKU)
+Vecture3D is a fork of Box3D physics engine designed and optimized for the Hytale Server.
 
 ## Features
 
-### Collision
-
-- Continuous collision detection
-- Contact events
-- Convex hulls, capsules, spheres, triangle meshes, and height fields
-- Multiple shapes per body
-- Collision filtering
-- Ray casts, shape casts, and overlap queries
-- Sensor system
-- Character mover
-
-### Physics
-
-- Robust _Soft Step_ rigid body solver
-- Continuous physics for fast translations and rotations
-- Island based sleep
-- Revolute, prismatic, distance, motor, weld, and wheel joints
-- Joint limits, motors, springs, and friction
-- Joint and contact forces
-- Body movement events and sleep notification
-
-### System
-
-- Data-oriented design
-- Written in portable C17
-- Extensive multithreading and SIMD
-- Optimized for large piles of bodies
-- Cross platform determinism
-- Recording and replay
-
-### Samples
-
-- Uses sokol to run with D3D11 on Windows, Metal on macOS, and OpenGL 4.5 on Linux.
-- Graphical user interface with imgui.
-- Many samples to demonstrate features and performance.
+Vecture3D includes all features synced by the upstream repo: [Box3D's features](https://github.com/erincatto/box3d#features).
 
 ## Building all platforms
 
@@ -155,27 +119,25 @@ The user manual lives in [`docs/`](docs/) and is built with Doxygen. Enable the 
 
 ## Community
 
-- [Discord](https://discord.gg/NKYgCBP)
+- [Box3D's discord](https://discord.gg/NKYgCBP)
+- [HytaleModding's discord](https://discord.gg/tanu3KxN85)
 
 ## Contributing
 
-Pull requests are currently disabled. Instead, please file an issue for bugs or feature requests. For support, please visit the Discord server.
+Pull requests are welcomed if they follow a created issue that describes precisely the problem or feature request.
 
 ## Giving feedback
 
-Please file an issue or start a chat on discord. You can also use [GitHub Discussions](https://github.com/erincatto/box3d/discussions).
-
+Before submitting an issue here please understand if the issue is related to Box3D or Vecture3D modifications. 
+- For the former: please file an issue or start a chat on discord. You can also use [GitHub Discussions](https://github.com/erincatto/box3d/discussions).
+- For the latter: file an issue in this repo
 ## License
 
-Box3D is developed by Erin Catto and uses the [MIT license](https://en.wikipedia.org/wiki/MIT_License).
-
-## Sponsorship
-
-Support development of Box3D through [Github Sponsors](https://github.com/sponsors/erincatto).
-
-Please consider starring this repository and subscribing to my [YouTube channel](https://www.youtube.com/@erin_catto).
+Vecture3D is developed by Blovien and it's a forked work of Box3D developed by Erin Catto. Both uses the [MIT license](https://en.wikipedia.org/wiki/MIT_License).
 
 ## LLM Usage
+
+Vecture3D follows the same LLM rules as its upstream:
 
 LLMs are used in the following areas:
 
