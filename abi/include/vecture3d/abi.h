@@ -110,12 +110,9 @@ typedef struct v3_cooked_grid v3_cooked_grid;
 // Four fixed steps times the native bound of 256 events for each of END, BEGIN and HIT.
 #define V3_BLOCK_CONTACT_EVENT_CAPACITY UINT32_C( 3072 )
 
-// World motion limits and configuration. Explicit layout: four 4 byte fields at offsets 0, 4, 8 and 12,
-// size 16, alignment 4, no implicit padding.
-//
-// Speed limits alone do not guarantee collision safety. BlockGrid speculative admission predicts free
-// motion over the current step. Later contact or joint impulses can change that motion, and rotational
-// paths are not certified. Test the chosen speeds and timestep against the game's geometry.
+// Speed limits do not guarantee collision safety. Speculative admission predicts free motion,
+// which later contact or joint impulses can change. Rotational paths are not certified.
+// Test speeds and timestep against the game's geometry.
 typedef struct v3_world_limits
 {
 	// Meters per second. Zero selects the engine default (400 m/s).
@@ -200,23 +197,16 @@ typedef struct v3_distance_joint_command
 	uint32_t flags;
 } v3_distance_joint_command;
 
-/// Revolute constraint between two distinct dynamic or kinematic bodies, using the shared
-/// distance/revolute logical joint identity. Local anchors are in meters from each body origin.
-/// Local rotations are normalized quaternions in xyzw order. Their squared norm must differ
-/// from 1 by less than 20*FLT_EPSILON.
-/// Each frame's local z-axis is the hinge axis. Rotation of frame B relative to frame A
-/// about that axis defines the signed angle in radians, using the right hand rule.
-/// All floats must be finite. target_angle is the spring position target in [-pi, pi];
-/// motor_speed is the velocity target in radians per second. hertz, damping_ratio and
-/// max_motor_torque (newton meters) must be nonnegative. lower_angle <= upper_angle and both
-/// must lie in [-0.99*pi, 0.99*pi], even when limits are disabled. The spring target need
-/// not lie within the limits. flags accepts SPRING, LIMIT, MOTOR and COLLIDE_CONNECTED;
-/// a clear flag disables that feature. Connected collision is disabled by default.
-/// reserved0 must be zero. generation is in [1, INT32_MAX].
+/// Revolute joint between distinct dynamic or kinematic bodies. IDs are shared with distance joints.
+/// All floats must be finite. Anchors use meters from the body origin. Frame rotations use xyzw
+/// quaternions with |squared norm - 1| < 20*FLT_EPSILON. Each frame's local z-axis is the hinge axis.
+/// The signed angle measures frame B relative to A in radians using the right hand rule.
 typedef struct v3_revolute_joint_command
 {
 	uint64_t logical_id;
+	// [1, INT32_MAX].
 	uint32_t generation;
+	// V3_JOINT_* flags. Unset features, including connected collision, are disabled.
 	uint32_t flags;
 	v3_body_handle body_a;
 	v3_body_handle body_b;
@@ -234,13 +224,19 @@ typedef struct v3_revolute_joint_command
 	float local_rotation_b_y;
 	float local_rotation_b_z;
 	float local_rotation_b_w;
+	// Spring target in [-pi, pi], independent of the limits.
 	float target_angle;
+	// Nonnegative spring frequency and damping.
 	float hertz;
 	float damping_ratio;
+	// Ordered bounds within [-0.99*pi, 0.99*pi], even when limits are disabled.
 	float lower_angle;
 	float upper_angle;
+	// Nonnegative, in newton meters.
 	float max_motor_torque;
+	// Motor target in radians per second.
 	float motor_speed;
+	// Must be zero.
 	uint32_t reserved0;
 } v3_revolute_joint_command;
 
@@ -402,11 +398,7 @@ typedef struct v3_step_stats
 	uint32_t block_contact_event_flags;
 } v3_step_stats;
 
-// v3_body_definition, v3_block_material, v3_block_cell and v3_block_box describe cook and attach inputs.
-
-/// Pose, velocity and damping for v3_world_attach_block_grid and v3_world_create_sphere_body.
-/// handle supplies the logical identity and generation used by removals, wrenches, kinematic
-/// targets and queries after creation.
+/// Body creation parameters. handle supplies the new body's logical ID and generation.
 typedef struct v3_body_definition
 {
 	v3_body_handle handle;
@@ -459,12 +451,9 @@ typedef struct v3_block_cell
 	uint32_t reserved;
 } v3_block_cell;
 
-// One collision box in the cell selected by owner_cell_index in this cook's cell array.
-// Boxes may arrive in any order and are grouped by cell. The center and half extents are cell local.
-// Both center - half_extent and center + half_extent must lie within [0, 1] on every axis.
-// A full cube has center (0.5, 0.5, 0.5) and half extents (0.5, 0.5, 0.5).
-// The cook places the box at the cell coordinate. material_index selects its material.
-// feature_id is reserved for fracture and ignored. Reported identity uses the cell's feature_id.
+// Collision box in owner_cell_index, with cell-local bounds inside [0, 1] on every axis.
+// Bounds are center +/- half extent. Boxes may arrive in any order. material_index selects
+// the material. feature_id is ignored: reported identity uses the cell's feature_id.
 typedef struct v3_block_box
 {
 	float center_x;
@@ -634,47 +623,29 @@ V3_API v3_status v3_world_replace_box_bodies( v3_world* world, const v3_body_han
 											  const v3_box_body_command* creations, uint32_t creation_count );
 V3_API v3_status v3_world_create_hull_body( v3_world* world, const v3_box_body_command* command, const float* point_xyz,
 											uint32_t point_count );
-/// Create a body with one sphere centered at its local origin. radius must be finite and positive,
-/// density finite and positive for dynamic bodies or zero otherwise, and friction finite in [0, 1].
-/// V3_BODY_BULLET is valid only for dynamic bodies. body is read only during this call. On success, *out receives body->handle
-/// and the world owns the body until removal or world destruction. Failure leaves *out unchanged and creates no body. Removed
-/// handles become stale and reuse requires a new generation.
+/// Create a sphere at the body origin. radius must be positive and friction in [0, 1], both finite.
+/// density must be finite and positive for dynamic bodies, zero otherwise. Only dynamic bodies
+/// accept V3_BODY_BULLET. body is read during this call. Success writes body->handle to *out.
+/// Failure leaves *out unchanged and creates no body. Reusing a removed ID requires a new generation.
 V3_API v3_status v3_world_create_sphere_body( v3_world* world, const v3_body_definition* body, float radius, float density,
 											  float friction, v3_body_handle* out );
-// Cook immutable BlockGrid geometry without touching a world. On success *out owns one reference to
-// the cooked data and the caller destroys it with v3_destroy_cooked_grid; the handle is independent
-// of any world and the same handle may back shapes in several worlds. Every array is read during
-// the call only, and every count must be greater than zero. cells and boxes are matched by
-// owner_cell_index, which indexes cells and must be in range; boxes may arrive in any order. Any
-// failure writes NULL through out and cooks nothing: V3_INVALID_ARGUMENT for a missing pointer, a
-// zero count or a reserved field that is not zero, V3_INVALID_MATERIAL for an unusable material or
-// a material index out of range, V3_INVALID_OWNER for an owner index out of range, V3_NON_FINITE
-// for a value that is not finite, V3_INVALID_CELL for a cell with no box or a coordinate the cook
-// cannot represent, V3_DUPLICATE_CELL for two cells at one coordinate, V3_INVALID_DIMENSION for a
-// box outside its own unit cell, V3_LIMIT_EXCEEDED past a cook limit and V3_OUT_OF_MEMORY when the
-// allocator cannot satisfy it.
+// Cook geometry independently of any world. Arrays are read only during this call. Require finite
+// floats, nonzero counts, valid material and owner_cell_index values, unique cells, and a box per cell.
+// Cell flags and reserved fields must be zero. On success, *out owns one reference, released with
+// v3_destroy_cooked_grid. Failure sets *out to NULL when out is non-NULL and creates no handle.
 V3_API v3_status v3_cook_block_grid( const v3_block_material* materials, uint32_t material_count, const v3_block_cell* cells,
 									 uint32_t cell_count, const v3_block_box* boxes, uint32_t box_count, v3_cooked_grid** out );
-// Create a static, kinematic or dynamic body from body and attach cooked geometry to it. The shape
-// takes its own reference on the cooked data, so the caller may destroy grid as soon as this
-// returns. A non-NULL mass_override installs explicit mass data on the new body and must be finite
-// with a positive mass and a positive definite inertia tensor; a NULL override leaves the mass Box3D
-// derives from the geometry. The new body handle is written through out and is addressable by every
-// other body operation.
+// Create body and attach grid, retaining its geometry. The caller may then destroy grid.
+// A NULL mass_override derives mass from geometry. An override must be finite, with positive mass
+// and a positive definite inertia tensor. Success writes the new body handle to *out.
 V3_API v3_status v3_world_attach_block_grid( v3_world* world, const v3_body_definition* body, v3_cooked_grid* grid,
 											 const v3_mass_properties* mass_override, v3_body_handle* out );
-/// Replace the geometry of an active BlockGrid body atomically between steps. The world and grid
-/// must be live handles. Success retains grid independently of the caller and preserves logical,
-/// body and shape identities, pose, filters and event flags. Derived mass uses the existing shape
-/// density; explicit mass overrides and their cached center remain unchanged. Angular velocity
-/// is preserved. A derived center shift adjusts linear velocity by angular velocity cross the
-/// world center displacement, following native mass recomputation.
-/// Contacts are rebuilt: retained cells may emit END then BEGIN while support is restored.
-/// Success wakes the body and advances the mutation and native replacement counters once.
-/// Failure preserves geometry and observable body state. Returns V3_INVALID_ARGUMENT for NULL
-/// pointers or malformed handles, V3_STALE_HANDLE for an inactive or mismatched generation,
-/// V3_INVALID_BLOCK_GRID for the wrong shape type or missing cooked data, V3_OUT_OF_MEMORY for
-/// reservation failure, and V3_NATIVE_FAILURE if the native world is locked.
+/// Replace geometry between steps using live world, body, and grid handles. Success retains grid
+/// and preserves body and shape IDs, pose, filters, event flags, and angular velocity.
+/// Recompute derived mass at the existing density. A center shift adds angular velocity crossed
+/// with world center displacement to linear velocity. Explicit mass and cached center are unchanged.
+/// Rebuild contacts, which may emit END then BEGIN for retained cells. Wake the body and increment
+/// mutation and replacement counters once. Failure preserves geometry and observable body state.
 V3_API v3_status v3_world_replace_block_grid( v3_world* world, const v3_body_handle* body, v3_cooked_grid* grid );
 // Release the handle's one reference to its cooked data. NULL is accepted. Cooked bytes survive
 // until the last reference, from any shape or any world, is gone.
@@ -682,21 +653,11 @@ V3_API void v3_destroy_cooked_grid( v3_cooked_grid* grid );
 V3_API v3_status v3_world_replace_distance_joints( v3_world* world, const v3_joint_handle* removals, uint32_t removal_count,
 												   const v3_distance_joint_command* creations, uint32_t creation_count );
 /// Atomically remove joints of either kind and create revolute joints between steps.
-/// Arrays may be NULL only when their count is zero. Each count and the active and temporary
-/// joint totals are limited to 4096, as is the number of logical joint IDs ever admitted.
-/// New IDs start at generation 1; reuse advances the previous generation by exactly one,
-/// including changes between distance and revolute. Active IDs must be removed in this batch.
-/// Complete validation precedes mutation. Failed validation or native creation preserves
-/// accepted joints, body relationships and mutation counters. Success prevents removal of
-/// either attached body until its joints are removed. World ownership and threading rules
-/// are the same as for distance replacement.
-/// Returns V3_INVALID_ARGUMENT for malformed pointers, IDs, flags, reserved fields, negative
-/// torque, static or identical participants, or invalid angle bounds; V3_NON_FINITE for
-/// nonfinite anchors or settings; V3_INVALID_QUATERNION for invalid local rotations;
-/// V3_INVALID_DAMPING for negative hertz or damping; V3_STALE_HANDLE for stale handles;
-/// V3_DUPLICATE_ID, V3_INVALID_GENERATION or V3_GENERATION_EXHAUSTED for identity violations;
-/// V3_LIMIT_EXCEEDED or V3_PEAK_LIMIT_EXCEEDED for capacity violations; V3_OUT_OF_MEMORY
-/// for reservation failure; and V3_NATIVE_FAILURE when native creation returns no joint.
+/// Arrays may be NULL only for zero counts. Each count, active/temporary joint total, and lifetime
+/// logical ID total is limited to 4096. New IDs use generation 1. Reuse increments it by exactly one,
+/// including when switching joint kinds. Active IDs must be removed in this batch before reuse.
+/// Validation and creation failures preserve joints, body relationships, and mutation counters.
+/// Attached bodies cannot be removed until their joints are removed. Distance-joint threading rules apply.
 V3_API v3_status v3_world_replace_revolute_joints( v3_world* world, const v3_joint_handle* removals, uint32_t removal_count,
 												   const v3_revolute_joint_command* creations, uint32_t creation_count );
 V3_API v3_status v3_world_step_and_read( v3_world* world, const v3_kinematic_target* targets, uint32_t target_count,
@@ -704,11 +665,10 @@ V3_API v3_status v3_world_step_and_read( v3_world* world, const v3_kinematic_tar
 										 uint32_t query_count, uint32_t fixed_step_count, v3_transform* transforms,
 										 uint32_t transform_capacity, v3_query_result* query_results,
 										 uint32_t query_result_capacity, v3_step_stats* stats );
-// Copy the completed call's BlockGrid event batch without advancing simulation. Events are ordered
-// by fixed step and then END, BEGIN and HIT, preserving native order within each kind. Use
-// block_contact_event_count from the last successful step stats as the required capacity. event_count
-// receives the required size on success or V3_OUTPUT_TOO_SMALL, so an undersized destination may be
-// retried unchanged.
+// Copy the last successful step call's events in fixed-step order, then END, BEGIN, HIT order,
+// preserving native order within each kind. block_contact_event_count gives the required capacity.
+// *event_count receives that size on success or V3_OUTPUT_TOO_SMALL. An undersized copy can be retried
+// without changing the batch or advancing simulation.
 V3_API v3_status v3_world_get_block_contact_events( const v3_world* world, v3_block_contact_event* events,
 													uint32_t event_capacity, uint32_t* event_count );
 V3_API void v3_world_destroy( v3_world* world );

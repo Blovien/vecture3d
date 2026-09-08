@@ -123,53 +123,6 @@ static const v3BlockContactSide* GridSide( const v3BlockContactEvent* event )
 	return event->sideA.isBlockGrid ? &event->sideA : &event->sideB;
 }
 
-static int SlidingReportsCellTransition( void )
-{
-	v3BlockGridData* grid = CookEventSlab();
-	ENSURE( grid != NULL );
-	b3WorldId world = CreateEventWorld();
-	CreateEventTerrain( world, grid );
-	v3DestroyBlockGridData( grid );
-	b3BodyId sphereBody;
-	CreateEventSphere( world, &sphereBody );
-	for ( int step = 0; step < 180; ++step )
-	{
-		b3World_Step( world, 1.0f / 60.0f, 4 );
-	}
-	b3Body_SetLinearVelocity( sphereBody, (b3Vec3){ 0.5f, 0.0f, 0.0f } );
-	bool endedOld = false;
-	bool beganNew = false;
-	bool valid = true;
-	for ( int step = 0; step < 60; ++step )
-	{
-		b3World_Step( world, 1.0f / 60.0f, 4 );
-		v3BlockContactEvents events = v3World_GetBlockContactEvents( world );
-		valid = valid && !events.truncated;
-		for ( int i = 0; i < events.endCount; ++i )
-		{
-			const v3BlockContactSide* side = GridSide( events.endEvents + i );
-			valid = valid && side->cellX == -1 && side->cellY == 0 && side->cellZ == 0 && side->userData == 991;
-			endedOld = true;
-		}
-		for ( int i = 0; i < events.beginCount; ++i )
-		{
-			const v3BlockContactSide* side = GridSide( events.beginEvents + i );
-			valid = valid && side->cellX == 0 && side->cellY == 0 && side->cellZ == 0 && side->userData == 991;
-			beganNew = true;
-		}
-	}
-	b3Body_SetLinearVelocity( sphereBody, b3Vec3_zero );
-	for ( int step = 0; step < 30; ++step )
-	{
-		b3World_Step( world, 1.0f / 60.0f, 4 );
-		v3BlockContactEvents events = v3World_GetBlockContactEvents( world );
-		valid = valid && events.beginCount == 0 && events.endCount == 0;
-	}
-	b3DestroyWorld( world );
-	ENSURE( valid && endedOld && beganNew );
-	return 0;
-}
-
 static int DestructionPreservesEndIdentity( void )
 {
 	v3BlockGridData* grid = CookEventSlab();
@@ -331,23 +284,47 @@ static void EventFree( void* memory )
 #endif
 }
 
-static int SlideEventRoundTrip( b3WorldId world, b3BodyId sphereBody )
+static bool SlideEventRoundTrip( b3WorldId world, b3BodyId sphereBody )
 {
-	int begins = 0;
+	bool valid = true;
 	for ( int direction = 0; direction < 2; ++direction )
 	{
+		int oldCellX = direction == 0 ? -1 : 0;
+		int newCellX = direction == 0 ? 0 : -1;
+		bool endedOld = false;
+		bool beganNew = false;
 		b3Body_SetLinearVelocity( sphereBody, (b3Vec3){ direction == 0 ? 0.5f : -0.5f, 0.0f, 0.0f } );
 		for ( int step = 0; step < 60; ++step )
 		{
 			b3World_Step( world, 1.0f / 60.0f, 4 );
 			v3BlockContactEvents events = v3World_GetBlockContactEvents( world );
-			begins += events.beginCount;
+			valid = valid && !events.truncated;
+			for ( int i = 0; i < events.endCount; ++i )
+			{
+				const v3BlockContactSide* side = GridSide( events.endEvents + i );
+				valid = valid && side->cellX == oldCellX && side->cellY == 0 && side->cellZ == 0 && side->userData == 991;
+				endedOld = true;
+			}
+			for ( int i = 0; i < events.beginCount; ++i )
+			{
+				const v3BlockContactSide* side = GridSide( events.beginEvents + i );
+				valid = valid && side->cellX == newCellX && side->cellY == 0 && side->cellZ == 0 && side->userData == 991;
+				beganNew = true;
+			}
+		}
+		valid = valid && endedOld && beganNew;
+		b3Body_SetLinearVelocity( sphereBody, b3Vec3_zero );
+		for ( int step = 0; step < 30; ++step )
+		{
+			b3World_Step( world, 1.0f / 60.0f, 4 );
+			v3BlockContactEvents events = v3World_GetBlockContactEvents( world );
+			valid = valid && !events.truncated && events.beginCount == 0 && events.endCount == 0;
 		}
 	}
-	return begins;
+	return valid;
 }
 
-static int WarmCellTransitionsAllocateNothing( void )
+static int SlidingReportsCellTransitionsWithoutAllocations( void )
 {
 	b3SetAllocator( EventAlloc, EventFree );
 	v3BlockGridData* grid = CookEventSlab();
@@ -365,14 +342,14 @@ static int WarmCellTransitionsAllocateNothing( void )
 	{
 		b3World_Step( world, 1.0f / 60.0f, 4 );
 	}
-	SlideEventRoundTrip( world, sphereBody );
-	SlideEventRoundTrip( world, sphereBody );
+	bool valid = SlideEventRoundTrip( world, sphereBody );
+	valid &= SlideEventRoundTrip( world, sphereBody );
 	eventAllocationCount = 0;
-	int begins = SlideEventRoundTrip( world, sphereBody );
+	valid &= SlideEventRoundTrip( world, sphereBody );
 	int allocations = eventAllocationCount;
 	b3DestroyWorld( world );
 	b3SetAllocator( NULL, NULL );
-	ENSURE( begins >= 2 );
+	ENSURE( valid );
 	ENSURE( allocations == 0 );
 	return 0;
 }
@@ -464,10 +441,9 @@ int V3BlockGridEventsTest( void )
 {
 	RUN_SUBTEST( SphereEventNamesMergedCell );
 	RUN_SUBTEST( GridPairUsesEachLocalCell );
-	RUN_SUBTEST( SlidingReportsCellTransition );
 	RUN_SUBTEST( DestructionPreservesEndIdentity );
 	RUN_SUBTEST( ReplacementEndsOldCell );
-	RUN_SUBTEST( WarmCellTransitionsAllocateNothing );
+	RUN_SUBTEST( SlidingReportsCellTransitionsWithoutAllocations );
 	RUN_SUBTEST( EventOverflowIsReported );
 	return 0;
 }

@@ -948,12 +948,7 @@ static bool SettleProbeOnGrid( v3BlockGridData* grid, b3Pos gridPosition, b3Pos 
 	return ok;
 }
 
-// Cooked geometry is a function of the field, never of the order the caller listed it in.
-//
-// Derivation: cooking sorts blocks by cell coordinate and derives every identity, every index and
-// every merged run from that order, so two permutations of one hull cannot differ in a single
-// cooked byte. The comparison is therefore exact, not toleranced, on the payload, on a cast and
-// on a settled pose.
+// Permuting the input cells must preserve the entire cooked allocation.
 static int V3BlockGridShuffledDefinitionCooksIdentically( void )
 {
 	int status = 1;
@@ -999,33 +994,13 @@ static int V3BlockGridShuffledDefinitionCooksIdentically( void )
 	V3_CONTACTS_ENSURE( orderedStats.culledBoxCount == 0 );
 	V3_CONTACTS_ENSURE( orderedStats.boxCount + orderedStats.culledBoxCount + orderedStats.mergedBoxCount == 2520 );
 
-	// Same solid, same answers: one ray at each cook, same origin and direction, has to report the
-	// same entry fraction and the same face. The hull top face sits at y = 12 over the whole footprint,
-	// so a ray fired straight down from y = 20 at ( 4, 4 ) travels 8 of its 20 units before it lands
-	// on that face and reports 0.4 with an up normal.
-	float orderedFraction = -1.0f;
-	float shuffledFraction = -1.0f;
-	b3Vec3 orderedNormal = b3Vec3_zero;
-	b3Vec3 shuffledNormal = b3Vec3_zero;
+	// The shell's top is y=12, eight units into this twenty-unit ray.
+	float fraction = -1.0f;
+	b3Vec3 normal = b3Vec3_zero;
 	V3_CONTACTS_ENSURE(
-		CastRayAtGrid( ordered, (b3Pos){ 4.5, 20.0, 4.5 }, (b3Vec3){ 0.0f, -20.0f, 0.0f }, &orderedFraction, &orderedNormal ) );
-	V3_CONTACTS_ENSURE( CastRayAtGrid( shuffled, (b3Pos){ 4.5, 20.0, 4.5 }, (b3Vec3){ 0.0f, -20.0f, 0.0f }, &shuffledFraction,
-									   &shuffledNormal ) );
-	V3_CONTACTS_ENSURE( orderedFraction == shuffledFraction );
-	V3_CONTACTS_ENSURE( orderedNormal.x == shuffledNormal.x && orderedNormal.y == shuffledNormal.y &&
-						orderedNormal.z == shuffledNormal.z );
-	V3_CONTACTS_ENSURE( fabsf( orderedFraction - 0.4f ) <= 1e-6f );
-	V3_CONTACTS_ENSURE( orderedNormal.y > 0.9f );
-
-	// Same solid, same behavior: a probe dropped on either cook settles in the same place.
-	b3Pos orderedRest, shuffledRest;
-	b3Vec3 orderedVelocity, shuffledVelocity;
-	V3_CONTACTS_ENSURE( SettleProbeOnGrid( ordered, b3Pos_zero, (b3Pos){ 4.0, 13.0, 4.0 }, 90, &orderedRest, &orderedVelocity ) );
-	V3_CONTACTS_ENSURE(
-		SettleProbeOnGrid( shuffled, b3Pos_zero, (b3Pos){ 4.0, 13.0, 4.0 }, 90, &shuffledRest, &shuffledVelocity ) );
-	V3_CONTACTS_ENSURE( orderedRest.x == shuffledRest.x && orderedRest.y == shuffledRest.y && orderedRest.z == shuffledRest.z );
-	V3_CONTACTS_ENSURE( orderedVelocity.x == shuffledVelocity.x && orderedVelocity.y == shuffledVelocity.y &&
-						orderedVelocity.z == shuffledVelocity.z );
+		CastRayAtGrid( ordered, (b3Pos){ 4.5, 20.0, 4.5 }, (b3Vec3){ 0.0f, -20.0f, 0.0f }, &fraction, &normal ) );
+	V3_CONTACTS_ENSURE( fabsf( fraction - 0.4f ) <= 1e-6f );
+	V3_CONTACTS_ENSURE( normal.y > 0.9f );
 
 	status = 0;
 cleanup:
@@ -1958,20 +1933,7 @@ static bool SupportLossResultIsSupported( const SupportLossResult* result )
 		   fabsf( result->velocity.y ) <= 0.05f;
 }
 
-// The 4,097th real touching pair must continue into bounded reduction. Losing the contact gives
-// the independently derived free-fall pose y = 0.795833333 after these twelve steps.
-static int V3BlockGridTouchingPairBatchKeepsSupport( void )
-{
-	int status = 1;
-	SupportLossResult result;
-	V3_CONTACTS_ENSURE( RunSupportLossCase( 4097, false, 1, false, false, &result ) );
-	printf( "touching-pair batch 4097: y %.9f vy %.9f\n", result.position.y, result.velocity.y );
-	V3_CONTACTS_ENSURE( SupportLossResultIsSupported( &result ) );
-	status = 0;
-cleanup:
-	return status;
-}
-
+// Exercise both sides of the 4,096-pair boundary and continue through multiple batches.
 static int V3BlockGridTouchingPairBatchBoundariesAndOrder( void )
 {
 	int status = 1;
@@ -2103,7 +2065,6 @@ int V3BlockGridContactsTest( void )
 	RUN_SUBTEST( V3BlockGridOverlappingBoxesStayOneSource );
 	RUN_SUBTEST( V3BlockGridBuriedFaceMasksAreCooked );
 	RUN_SUBTEST( V3BlockGridBuriedFaceCullingKeepsFlatSupport );
-	RUN_SUBTEST( V3BlockGridTouchingPairBatchKeepsSupport );
 	RUN_SUBTEST( V3BlockGridTouchingPairBatchBoundariesAndOrder );
 	RUN_SUBTEST( V3BlockGridTouchingPairBatchPreservesMaterialsAndIslands );
 	RUN_SUBTEST( V3BlockGridTouchingPairBatchRebuildsAfterReplacement );
