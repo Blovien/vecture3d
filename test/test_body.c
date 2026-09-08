@@ -12,6 +12,24 @@
 #include "physics_world.h"
 
 #include <float.h>
+#include <math.h>
+
+#ifndef NDEBUG
+static bool s_captureSafetyFactorAssertion;
+static int s_safetyFactorAssertionCount;
+
+static int SafetyFactorAssertFcn( const char* condition, const char* fileName, int lineNumber )
+{
+	if ( s_captureSafetyFactorAssertion )
+	{
+		s_safetyFactorAssertionCount += 1;
+		return 0;
+	}
+
+	printf( "BOX3D ASSERTION: %s, %s, line %d\n", condition, fileName, lineNumber );
+	return 1;
+}
+#endif
 
 // b3UpdateBodyMassData shifts each shape's inertia to the body center of mass with the parallel
 // axis theorem. When shapes sit far from the body origin the shift term dwarfs the central inertia,
@@ -475,6 +493,170 @@ static int ShapeExtents( void )
 	return 0;
 }
 
+static int SafetyFactorContract( void )
+{
+	b3BodyDef bodyDef = b3DefaultBodyDef();
+	ENSURE( bodyDef.safetyFactor == 0.5f );
+
+	b3WorldDef worldDef = b3DefaultWorldDef();
+	b3WorldId worldId = b3CreateWorld( &worldDef );
+
+	bodyDef.type = b3_dynamicBody;
+	bodyDef.safetyFactor = 0.1f;
+	b3BodyId bodyId = b3CreateBody( worldId, &bodyDef );
+	ENSURE( b3Body_GetSafetyFactor( bodyId ) == 0.1f );
+
+	b3Body_SetSafetyFactor( bodyId, 0.25f );
+	ENSURE( b3Body_GetSafetyFactor( bodyId ) == 0.25f );
+	b3Body_SetSafetyFactor( bodyId, 0.0f );
+	ENSURE( b3Body_GetSafetyFactor( bodyId ) == 0.0f );
+	b3Body_SetSafetyFactor( bodyId, 2.0f );
+	ENSURE( b3Body_GetSafetyFactor( bodyId ) == 2.0f );
+
+	b3DestroyWorld( worldId );
+	return 0;
+}
+
+#ifndef NDEBUG
+static int SafetyFactorValidation( void )
+{
+	b3SetAssertFcn( SafetyFactorAssertFcn );
+
+	b3WorldDef worldDef = b3DefaultWorldDef();
+	b3WorldId worldId = b3CreateWorld( &worldDef );
+	float invalidFactors[] = { -1.0f, NAN, INFINITY, -INFINITY };
+	for ( int i = 0; i < ARRAY_COUNT( invalidFactors ); ++i )
+	{
+		b3BodyDef bodyDef = b3DefaultBodyDef();
+		bodyDef.type = b3_dynamicBody;
+		bodyDef.safetyFactor = invalidFactors[i];
+
+		int previousCount = s_safetyFactorAssertionCount;
+		s_captureSafetyFactorAssertion = true;
+		b3BodyId invalidBodyId = b3CreateBody( worldId, &bodyDef );
+		s_captureSafetyFactorAssertion = false;
+		ENSURE( s_safetyFactorAssertionCount == previousCount + 1 );
+		b3DestroyBody( invalidBodyId );
+	}
+
+	b3BodyDef bodyDef = b3DefaultBodyDef();
+	bodyDef.type = b3_dynamicBody;
+	b3BodyId bodyId = b3CreateBody( worldId, &bodyDef );
+	for ( int i = 0; i < ARRAY_COUNT( invalidFactors ); ++i )
+	{
+		int previousCount = s_safetyFactorAssertionCount;
+		s_captureSafetyFactorAssertion = true;
+		b3Body_SetSafetyFactor( bodyId, invalidFactors[i] );
+		s_captureSafetyFactorAssertion = false;
+		ENSURE( s_safetyFactorAssertionCount == previousCount + 1 );
+		b3Body_SetSafetyFactor( bodyId, 0.5f );
+	}
+
+	b3DestroyWorld( worldId );
+	return 0;
+}
+#endif
+
+static int ContinuousMotionPredicateBoundaries( void )
+{
+	b3Body body = { 0 };
+	b3BodySim sim = { 0 };
+	sim.minExtent = 1.0f;
+	b3BodyMotion motion = { 0 };
+	float factors[] = { 0.5f, 0.25f, 0.1f, 0.01f };
+	for ( int i = 0; i < ARRAY_COUNT( factors ); ++i )
+	{
+		body.safetyFactor = factors[i];
+		motion.maxDeltaPosition = nextafterf( factors[i], 0.0f );
+		ENSURE( b3BodyNeedsContinuousMotion( &body, &sim, motion, 1.0f ) == false );
+		motion.maxDeltaPosition = factors[i];
+		ENSURE( b3BodyNeedsContinuousMotion( &body, &sim, motion, 1.0f ) == false );
+		motion.maxDeltaPosition = nextafterf( factors[i], FLT_MAX );
+		ENSURE( b3BodyNeedsContinuousMotion( &body, &sim, motion, 1.0f ) );
+	}
+
+	body.safetyFactor = 0.0f;
+	motion.maxDeltaPosition = 0.0f;
+	ENSURE( b3BodyNeedsContinuousMotion( &body, &sim, motion, 1.0f ) == false );
+	motion.maxDeltaPosition = nextafterf( 0.0f, FLT_MAX );
+	ENSURE( b3BodyNeedsContinuousMotion( &body, &sim, motion, 1.0f ) );
+
+	// A long thin body can cross the threshold through farthest-point rotation alone.
+	sim.transform.q = b3Quat_identity;
+	sim.minExtent = 0.1f;
+	sim.maxExtent = (b3Vec3){ 10.0f, 0.1f, 0.1f };
+	b3BodyState state = b3_identityBodyState;
+	state.angularVelocity = (b3Vec3){ 0.0f, 0.0f, 0.1f };
+	motion = b3ComputeBodyMotion( &sim, &state );
+	ENSURE( motion.maxDeltaPosition == 0.0f );
+	body.safetyFactor = 0.1f;
+	ENSURE( b3BodyNeedsContinuousMotion( &body, &sim, motion, 0.01f ) );
+	body.safetyFactor = 0.11f;
+	ENSURE( b3BodyNeedsContinuousMotion( &body, &sim, motion, 0.01f ) == false );
+
+	return 0;
+}
+
+static int ContinuousMotionAdmission( void )
+{
+	b3WorldDef worldDef = b3DefaultWorldDef();
+	worldDef.gravity = b3Vec3_zero;
+	worldDef.enableSleep = false;
+	b3WorldId worldId = b3CreateWorld( &worldDef );
+
+	b3BodyDef bodyDef = b3DefaultBodyDef();
+	bodyDef.type = b3_dynamicBody;
+	bodyDef.enableSleep = false;
+	bodyDef.gravityScale = 0.0f;
+	bodyDef.safetyFactor = 0.5f;
+	b3BodyId bodyId = b3CreateBody( worldId, &bodyDef );
+	b3ShapeDef shapeDef = b3DefaultShapeDef();
+	shapeDef.density = 1.0f;
+	b3Sphere sphere = { b3Vec3_zero, 0.5f };
+	b3CreateSphereShape( bodyId, &shapeDef, &sphere );
+	ENSURE( b3Body_GetMinExtent( bodyId ) == 0.5f );
+
+	b3World* world = b3GetWorldFromId( worldId );
+	b3Body* body = b3GetBodyFullId( world, bodyId );
+	const float timeStep = 0.25f;
+
+	// Exactly factor * minimum extent is not fast. The next representable motion is.
+	b3Body_SetLinearVelocity( bodyId, (b3Vec3){ 1.0f, 0.0f, 0.0f } );
+	b3World_Step( worldId, timeStep, 1 );
+	ENSURE( ( body->flags & b3_isFast ) == 0 );
+	b3Body_SetLinearVelocity( bodyId, (b3Vec3){ nextafterf( 1.0f, FLT_MAX ), 0.0f, 0.0f } );
+	b3World_Step( worldId, timeStep, 1 );
+	ENSURE( ( body->flags & b3_isFast ) != 0 );
+
+	// Zero admits every measured non-zero motion, but a stationary body remains slow.
+	b3Body_SetSafetyFactor( bodyId, 0.0f );
+	b3Body_SetLinearVelocity( bodyId, b3Vec3_zero );
+	b3World_Step( worldId, timeStep, 1 );
+	ENSURE( ( body->flags & b3_isFast ) == 0 );
+	b3Body_SetLinearVelocity( bodyId, (b3Vec3){ 0.5f, 0.0f, 0.0f } );
+	b3World_Step( worldId, timeStep, 1 );
+	ENSURE( ( body->flags & b3_isFast ) != 0 );
+
+	// Values above the recommended range remain valid and can suppress admission.
+	b3Body_SetSafetyFactor( bodyId, 2.0f );
+	b3Body_SetLinearVelocity( bodyId, (b3Vec3){ 2.0f, 0.0f, 0.0f } );
+	b3World_Step( worldId, timeStep, 1 );
+	ENSURE( ( body->flags & b3_isFast ) == 0 );
+
+	// Bullet status expands CCD targets after admission; it does not bypass this threshold.
+	b3Body_SetBullet( bodyId, true );
+	b3Body_SetSafetyFactor( bodyId, 0.5f );
+	b3Body_SetLinearVelocity( bodyId, (b3Vec3){ 1.0f, 0.0f, 0.0f } );
+	b3World_Step( worldId, timeStep, 1 );
+	ENSURE( ( body->flags & b3_isFast ) == 0 );
+	b3Body_SetLinearVelocity( bodyId, (b3Vec3){ nextafterf( 1.0f, FLT_MAX ), 0.0f, 0.0f } );
+	b3World_Step( worldId, timeStep, 1 );
+	ENSURE( ( body->flags & b3_isFast ) != 0 );
+
+	b3DestroyWorld( worldId );
+	return 0;
+}
+
 int BodyTest( void )
 {
 	RUN_SUBTEST( FarSingleSphereMass );
@@ -486,5 +668,11 @@ int BodyTest( void )
 	RUN_SUBTEST( SetMassDataZeroMass );
 	RUN_SUBTEST( SetMassDataConsistentVelocity );
 	RUN_SUBTEST( ShapeExtents );
+	RUN_SUBTEST( SafetyFactorContract );
+#ifndef NDEBUG
+	RUN_SUBTEST( SafetyFactorValidation );
+#endif
+	RUN_SUBTEST( ContinuousMotionPredicateBoundaries );
+	RUN_SUBTEST( ContinuousMotionAdmission );
 	return 0;
 }

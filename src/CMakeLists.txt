@@ -12,10 +12,24 @@ set(BOX3D_SOURCE_FILES
 	block_allocator.h
 	v3_block_grid.c
 	v3_block_grid_cook.c
+	v3_block_grid_contact.c
+	v3_block_grid_contact.h
+	v3_block_grid_events.c
+	v3_block_grid_events.h
 	v3_block_grid.h
 	v3_block_grid_internal.h
+	v3_block_grid_pair.c
+	v3_block_grid_pair_narrow.c
+	v3_block_grid_pair_reduce.c
+	v3_block_grid_pair_update.c
+	v3_block_grid_pair_update.h
+	v3_block_grid_pair_world.c
+	v3_block_grid_pair_world.h
+	v3_block_grid_pair.h
 	v3_block_grid_public.c
 	v3_block_grid_query.c
+	v3_block_grid_shape.c
+	v3_block_grid_shape.h
 	v3_interval.h
 	v3_obb_interval_sat.c
 	v3_obb_interval_sat.h

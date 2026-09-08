@@ -8,6 +8,7 @@
 #include "ctz.h"
 #include "physics_world.h"
 #include "shape.h"
+#include "v3_block_grid_shape.h"
 
 #include "box3d/collision.h"
 
@@ -23,10 +24,13 @@ typedef struct b3SensorQueryContext
 	b3Sensor* sensor;
 	b3Shape* sensorShape;
 	b3Transform transform;
+
+	// This worker's BlockGrid scratch, for a sensor shape that is a grid
+	v3BlockGridScratch* gridScratch;
 } b3SensorQueryContext;
 
 static bool b3OverlapSensor( b3Shape* sensorShape, b3Transform sensorTransform, b3Shape* visitorShape,
-							 b3Transform visitorTransform )
+							 b3Transform visitorTransform, v3BlockGridScratch* gridScratch )
 {
 	b3ShapeType type = sensorShape->type;
 
@@ -57,6 +61,9 @@ static bool b3OverlapSensor( b3Shape* sensorShape, b3Transform sensorTransform, 
 
 		case b3_voxelShape:
 			return b3OverlapCompound( sensorShape->voxel, b3Transform_identity, &localProxy );
+
+		case v3_blockGridShape:
+			return v3OverlapBlockGrid( sensorShape->blockGrid, b3Transform_identity, &localProxy, gridScratch );
 
 		case b3_heightShape:
 			return b3OverlapHeightField( sensorShape->heightField, b3Transform_identity, &localProxy );
@@ -152,7 +159,7 @@ static bool b3SensorQueryCallback( int proxyId, uint64_t userData, void* context
 
 	b3Transform otherTransform = b3ToRelativeTransform( b3GetBodyTransform( world, otherShape->bodyId ), b3Pos_zero );
 
-	bool overlap = b3OverlapSensor( sensorShape, queryContext->transform, otherShape, otherTransform );
+	bool overlap = b3OverlapSensor( sensorShape, queryContext->transform, otherShape, otherTransform, queryContext->gridScratch );
 	if ( overlap == false )
 	{
 		return true;
@@ -227,6 +234,7 @@ static void b3SensorTask( int startIndex, int endIndex, int workerIndex, void* c
 			.sensor = sensor,
 			.sensorShape = sensorShape,
 			.transform = transform,
+			.gridScratch = &world->taskContexts.data[workerIndex].blockGridScratch,
 		};
 
 		B3_ASSERT( sensorShape->sensorIndex == sensorIndex );

@@ -7,8 +7,6 @@
 #include "box3d/collision.h"
 #include "box3d/math_functions.h"
 
-#include "recording.h"
-
 #include <stdio.h>
 
 #define V3_DENSE_VOXEL_HULL_COUNT 32

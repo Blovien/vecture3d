@@ -8,10 +8,15 @@
 #include "block_allocator.h"
 #include "broad_phase.h"
 #include "constraint_graph.h"
+#include "core.h"
 #include "id_pool.h"
 #include "name_cache.h"
+#include "v3_block_grid_events.h"
+#include "v3_block_grid_shape.h"
 
 #include "box3d/types.h"
+
+#include <limits.h>
 
 #define B3_DEBUG_POINT_CAPACITY 64
 #define B3_DEBUG_LINE_CAPACITY 64
@@ -27,7 +32,6 @@ typedef struct b3SensorHit b3SensorHit;
 typedef struct b3Shape b3Shape;
 typedef struct b3SolverSet b3SolverSet;
 
-b3DeclareArray( b3BlockAllocator );
 b3DeclareArray( b3Body );
 b3DeclareArray( b3SolverSet );
 b3DeclareArray( b3Joint );
@@ -116,6 +120,18 @@ typedef struct b3TaskContext
 	int lineCount;
 
 	int manifoldCounts[B3_CONTACT_MANIFOLD_COUNT_BUCKETS];
+
+	// BlockGrid query and sweep scratch for work this worker runs: the broad-phase
+	// pair descent, the sensor overlap pass, and the continuous stage. The world sizes
+	// it when a grid shape is attached or replaced, so none of those allocate.
+	v3BlockGridScratch blockGridScratch;
+
+	// BlockGrid Projectile sweeps this worker ran this step, and how many of them the
+	// candidate cap left without an answer. Folded into the world counters after the
+	// continuous stage and zeroed there.
+	uint64_t blockGridSweepCount;
+	uint64_t blockGridCapExhaustionCount;
+
 	// Prevent false sharing
 	char cacheLine[64];
 } b3TaskContext;
@@ -130,9 +146,19 @@ typedef struct b3World
 	b3BroadPhase broadPhase;
 	b3ConstraintGraph constraintGraph;
 
-	// Manifold allocators have one allocator for each manifold count.
-	b3Array( b3BlockAllocator ) manifoldAllocators;
-	b3Mutex* manifoldAllocatorMutex;
+	// One manifold uses pooled storage, while larger arrays use exact-size allocations
+	b3BlockAllocator manifoldAllocator;
+	b3Mutex* contactAllocatorMutex;
+	uint64_t manifoldDirectBytes;
+	uint64_t blockGridPairBytes;
+
+	// Published unchanged by v3World_GetBlockGridPairCounters after every step
+	v3BlockGridPairCounters blockGridPairCounters;
+
+	// BlockGrid revisions published since the last step. The pair pass rebuilds the
+	// counters from zero every step, so a replacement between two steps parks its
+	// count here and the next step's rebuild moves it into the published struct.
+	uint64_t blockGridReplacementPendingCount;
 
 	// The body id pool is used to allocate and recycle body ids. Body ids
 	// provide a stable identifier for users, but incur caches misses when used
@@ -204,6 +230,19 @@ typedef struct b3World
 	b3Array( b3ContactHitEvent ) contactHitEvents;
 	b3Array( b3JointEvent ) jointEvents;
 
+	// Bounded BlockGrid contact publication and its cached logical identities.
+	b3Array( v3BlockContactEvent ) blockContactBeginEvents;
+	b3Array( v3BlockContactEvent ) blockContactHitEvents;
+	b3Array( v3BlockContactEvent ) blockContactEndEvents[2];
+	b3Array( v3BlockContactRecord ) blockContactStates[2];
+	int blockContactStateIndex;
+	int blockContactEndEventIndex;
+	uint32_t blockContactDroppedBeginCount;
+	uint32_t blockContactDroppedHitCount;
+	uint32_t blockContactDroppedEndCount[2];
+	bool blockContactStateIncomplete;
+	bool blockContactTransitionIncomplete;
+
 	// Used to track debug draw
 	b3BitSet debugBodySet;
 	b3BitSet debugJointSet;
@@ -229,6 +268,23 @@ typedef struct b3World
 	float hitEventThreshold;
 	float restitutionThreshold;
 	float maxLinearSpeed;
+
+	// Zero selects Box3D's per-step rotation clamp, resolved against the step length in b3World_Step
+	float maxAngularSpeed;
+
+	// Zero means unlimited Projectile sweep candidates
+	int projectileCandidateCap;
+
+	// BlockGrid query scratch for the world's own query entry points: ray cast, shape
+	// cast, overlap, mover, and body queries. Those are serialized with the world like
+	// its other operations, so one buffer serves them all.
+	v3BlockGridScratch blockGridQueryScratch;
+	// Private identity carried from one serialized BlockGrid narrow phase into its callback.
+	int blockGridQueryHitboxIndex;
+
+	// BlockGrid shapes attached to this world. Zero lets the continuous stage skip its
+	// deferred BlockGrid pass entirely.
+	int blockGridShapeCount;
 	float contactSpeed;
 	float contactHertz;
 	float contactDampingRatio;
@@ -291,9 +347,15 @@ typedef struct b3World
 
 b3World* b3GetUnlockedWorldFromId( b3WorldId id );
 b3World* b3GetWorldFromId( b3WorldId id );
+bool b3WorldUsesBuiltinContactMaterialPolicy( const b3World* world );
 
 b3World* b3GetUnlockedWorld( int index );
 b3World* b3GetWorld( int index );
+
+// Sizes every BlockGrid scratch the world owns, its own and one per worker, so any query
+// or sweep against this grid runs without allocating. Called when a grid shape is attached
+// or replaced, never inside a step or a query. Returns false only when the allocator fails.
+bool v3WorldReserveBlockGridScratch( b3World* world, const v3BlockGridData* grid );
 
 void b3ValidateConnectivity( b3World* world );
 void b3ValidateSolverSets( b3World* world );
@@ -310,6 +372,17 @@ const b3HullData* b3AddOwnedHullToDatabase( b3World* world, b3HullData* owned );
 // Release a reference to a shared hull. The owned copy is freed when the count reaches zero.
 void b3RemoveHullFromDatabase( b3World* world, const b3HullData* data );
 
+static inline size_t b3GetManifoldByteCount( int count )
+{
+	const size_t maxByteCount = (size_t)INT_MAX - ( B3_ALIGNMENT - 1 );
+	if ( count <= 0 || (size_t)count > maxByteCount / sizeof( b3Manifold ) )
+	{
+		return 0;
+	}
+
+	return (size_t)count * sizeof( b3Manifold );
+}
+
 static inline b3Manifold* b3AllocateManifolds( b3World* world, int count )
 {
 	if ( count == 0 )
@@ -317,21 +390,39 @@ static inline b3Manifold* b3AllocateManifolds( b3World* world, int count )
 		return NULL;
 	}
 
-	int index = count - 1;
-
-	// Need lock because this is called from the parallel narrow phase
-	b3LockMutex( world->manifoldAllocatorMutex );
-	int currentCount = world->manifoldAllocators.count;
-	for ( int i = currentCount; i < count; ++i )
+	size_t byteCount = b3GetManifoldByteCount( count );
+	if ( byteCount == 0 )
 	{
-		b3BlockAllocator allocator = b3CreateBlockAllocator( ( i + 1 ) * sizeof( b3Manifold ), 2 * B3_BLOCK_SIZE );
-		b3Array_Push( world->manifoldAllocators, allocator );
+		B3_ASSERT( false );
+		return NULL;
 	}
 
-	b3BlockAllocator* allocator = b3Array_Get( world->manifoldAllocators, index );
-	b3Manifold* manifolds = (b3Manifold*)b3AllocateElement( allocator );
-	b3UnlockMutex( world->manifoldAllocatorMutex );
-	memset( manifolds, 0, count * sizeof( b3Manifold ) );
+	b3Manifold* manifolds = NULL;
+
+	if ( count == 1 )
+	{
+		// The parallel narrow phase can reach this allocator, so creation and use share the same lock
+		b3LockMutex( world->contactAllocatorMutex );
+		if ( world->manifoldAllocator.elementSize == 0 )
+		{
+			world->manifoldAllocator = b3CreateBlockAllocator( sizeof( b3Manifold ), 2 * B3_BLOCK_SIZE );
+		}
+		manifolds = (b3Manifold*)b3AllocateElement( &world->manifoldAllocator );
+		b3UnlockMutex( world->contactAllocatorMutex );
+	}
+	else
+	{
+		manifolds = (b3Manifold*)b3Alloc( byteCount );
+		if ( manifolds != NULL )
+		{
+			b3LockMutex( world->contactAllocatorMutex );
+			B3_ASSERT( world->manifoldDirectBytes <= UINT64_MAX - byteCount );
+			world->manifoldDirectBytes += byteCount;
+			b3UnlockMutex( world->contactAllocatorMutex );
+		}
+	}
+
+	memset( manifolds, 0, byteCount );
 	return manifolds;
 }
 
@@ -342,10 +433,26 @@ static inline void b3FreeManifolds( b3World* world, b3Manifold* manifolds, int c
 		return;
 	}
 
-	int index = count - 1;
-	b3LockMutex( world->manifoldAllocatorMutex );
-	b3BlockAllocator* allocator = b3Array_Get( world->manifoldAllocators, index );
-	b3FreeElement( allocator, manifolds );
-	b3UnlockMutex( world->manifoldAllocatorMutex );
-}
+	B3_ASSERT( manifolds != NULL );
+	size_t byteCount = b3GetManifoldByteCount( count );
+	if ( byteCount == 0 )
+	{
+		B3_ASSERT( false );
+		return;
+	}
 
+	if ( count == 1 )
+	{
+		b3LockMutex( world->contactAllocatorMutex );
+		b3FreeElement( &world->manifoldAllocator, manifolds );
+		b3UnlockMutex( world->contactAllocatorMutex );
+	}
+	else
+	{
+		b3LockMutex( world->contactAllocatorMutex );
+		B3_ASSERT( world->manifoldDirectBytes >= byteCount );
+		world->manifoldDirectBytes -= byteCount;
+		b3UnlockMutex( world->contactAllocatorMutex );
+		b3Free( manifolds, byteCount );
+	}
+}

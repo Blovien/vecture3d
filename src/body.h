@@ -108,6 +108,7 @@ typedef struct b3Body
 	float sleepThreshold;
 	float sleepTime;
 	float sleepVelocity;
+	float safetyFactor;
 	float mass;
 
 	// local space inertia
@@ -241,6 +242,42 @@ bool b3WakeBodyWithLock( b3World* world, b3Body* body );
 void b3UpdateBodyMassData( b3World* world, b3Body* body );
 void b3SyncBodyFlags( b3World* world, b3Body* body );
 
+typedef struct b3BodyMotion
+{
+	float maxVelocity;
+	float maxDeltaPosition;
+} b3BodyMotion;
+
+static inline float b3ComputeBodyRotationArc( b3Vec3 localMotion, b3Vec3 extent )
+{
+	b3Vec3 motion = b3Abs( localMotion );
+	b3Vec3 arc = {
+		motion.y * extent.z + motion.z * extent.y,
+		motion.z * extent.x + motion.x * extent.z,
+		motion.x * extent.y + motion.y * extent.x,
+	};
+	return b3Length( arc );
+}
+
+// Point motion includes the farthest rotational arc so CCD qualification uses
+// the same measure as finalization
+static inline b3BodyMotion b3ComputeBodyMotion( const b3BodySim* sim, const b3BodyState* state )
+{
+	b3Vec3 localOmega = b3InvRotateVector( sim->transform.q, state->angularVelocity );
+	b3Vec3 localDeltaRotation = b3InvRotateVector( sim->transform.q, state->deltaRotation.v );
+	return (b3BodyMotion){
+		.maxVelocity = b3Length( state->linearVelocity ) + b3ComputeBodyRotationArc( localOmega, sim->maxExtent ),
+		.maxDeltaPosition =
+			b3Length( state->deltaPosition ) + 2.0f * b3ComputeBodyRotationArc( localDeltaRotation, sim->maxExtent ),
+	};
+}
+
+static inline bool b3BodyNeedsContinuousMotion( const b3Body* body, const b3BodySim* sim, b3BodyMotion motion, float timeStep )
+{
+	float maxMotion = b3MaxFloat( motion.maxDeltaPosition, motion.maxVelocity * timeStep );
+	return maxMotion > body->safetyFactor * sim->minExtent;
+}
+
 // Make a sweep relative to a base position to keep TOI in float precision far from the origin.
 static inline b3Sweep b3MakeRelativeSweep( const b3BodySim* bodySim, b3Pos base )
 {
@@ -252,4 +289,3 @@ static inline b3Sweep b3MakeRelativeSweep( const b3BodySim* bodySim, b3Pos base 
 	s.localCenter = bodySim->localCenter;
 	return s;
 }
-

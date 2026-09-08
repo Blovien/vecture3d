@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Andrea Rossi
 // SPDX-License-Identifier: MIT
 
+#include "body.h"
 #include "core.h"
+#include "physics_world.h"
+#include "shape.h"
 #include "v3_block_grid.h"
 #include "v3_block_grid_internal.h"
 #include "vecture3d/block_grid.h"
@@ -260,4 +263,152 @@ done:
 void v3DestroyBlockGridData( v3BlockGridData* data )
 {
 	v3BlockGrid_Release( data );
+}
+
+typedef struct v3ClosestCastContext
+{
+	b3World* world;
+	v3ClosestCastResult result;
+	bool ignoreInitialOverlap;
+} v3ClosestCastContext;
+
+static bool v3PublicCastComesFirst( const v3ClosestCastResult* candidate, const v3ClosestCastResult* current )
+{
+	if ( current->hit == false || candidate->fraction < current->fraction )
+	{
+		return true;
+	}
+	if ( candidate->fraction > current->fraction )
+	{
+		return false;
+	}
+	if ( candidate->shapeId.index1 != current->shapeId.index1 )
+	{
+		return candidate->shapeId.index1 < current->shapeId.index1;
+	}
+	if ( candidate->cellX != current->cellX )
+	{
+		return candidate->cellX < current->cellX;
+	}
+	if ( candidate->cellY != current->cellY )
+	{
+		return candidate->cellY < current->cellY;
+	}
+	if ( candidate->cellZ != current->cellZ )
+	{
+		return candidate->cellZ < current->cellZ;
+	}
+	return candidate->cellBoxIndex < current->cellBoxIndex;
+}
+
+static float v3PublicClosestCastCallback( b3ShapeId shapeId, b3Pos point, b3Vec3 normal, float fraction, uint64_t userMaterialId,
+										  int triangleIndex, int childIndex, void* context )
+{
+	B3_UNUSED( childIndex );
+	v3ClosestCastContext* cast = context;
+	if ( cast->ignoreInitialOverlap && fraction == 0.0f )
+	{
+		return 1.0f;
+	}
+
+	b3Shape* shape = b3Array_Get( cast->world->shapes, shapeId.index1 - 1 );
+	v3ClosestCastResult candidate = {
+		.bodyId = b3MakeBodyId( cast->world, shape->bodyId ),
+		.shapeId = shapeId,
+		.point = point,
+		.normal = normal,
+		.fraction = fraction,
+		.userMaterialId = userMaterialId,
+		.triangleIndex = triangleIndex,
+		.hit = true,
+	};
+	if ( shape->type == v3_blockGridShape )
+	{
+		v3BlockGridIdentity identity;
+		b3Body* body = b3Array_Get( cast->world->bodies, shape->bodyId );
+		if ( v3BlockGrid_ResolveIdentity( shape->blockGrid, b3GetBodyTransformQuick( cast->world, body ), point,
+										  cast->world->blockGridQueryHitboxIndex, &identity ) == false )
+		{
+			return 1.0f;
+		}
+		candidate.isBlockGrid = true;
+		candidate.cellX = identity.cellX;
+		candidate.cellY = identity.cellY;
+		candidate.cellZ = identity.cellZ;
+		candidate.cellBoxIndex = identity.cellBoxIndex;
+		candidate.materialIndex = identity.materialIndex;
+		candidate.userMaterialId = identity.userMaterialId;
+		candidate.userData = identity.userData;
+	}
+	if ( v3PublicCastComesFirst( &candidate, &cast->result ) )
+	{
+		cast->result = candidate;
+	}
+	return 1.0f;
+}
+
+v3ClosestCastResult v3World_CastShapeClosest( b3WorldId worldId, b3Pos origin, const b3ShapeProxy* proxy, b3Vec3 translation,
+											  b3QueryFilter filter )
+{
+	b3World* world = b3GetUnlockedWorldFromId( worldId );
+	if ( world == NULL || proxy == NULL || proxy->points == NULL || proxy->count <= 0 )
+	{
+		return (v3ClosestCastResult){ 0 };
+	}
+	v3ClosestCastContext context = { .world = world };
+	b3World_CastShape( worldId, origin, proxy, translation, filter, v3PublicClosestCastCallback, &context );
+	return context.result;
+}
+
+v3ClosestCastResult v3World_CastRayClosest( b3WorldId worldId, b3Pos origin, b3Vec3 translation, b3QueryFilter filter )
+{
+	b3World* world = b3GetUnlockedWorldFromId( worldId );
+	if ( world == NULL )
+	{
+		return (v3ClosestCastResult){ 0 };
+	}
+	v3ClosestCastContext context = { .world = world, .ignoreInitialOverlap = true };
+	b3World_CastRay( worldId, origin, translation, filter, v3PublicClosestCastCallback, &context );
+	return context.result;
+}
+
+v3ClosestCastResult v3World_CastSphereClosest( b3WorldId worldId, b3Pos origin, const b3Sphere* sphere, b3Vec3 translation,
+											   b3QueryFilter filter )
+{
+	if ( sphere == NULL )
+	{
+		return (v3ClosestCastResult){ 0 };
+	}
+	b3ShapeProxy proxy = { .points = &sphere->center, .count = 1, .radius = sphere->radius };
+	return v3World_CastShapeClosest( worldId, origin, &proxy, translation, filter );
+}
+
+v3ClosestCastResult v3World_CastCapsuleClosest( b3WorldId worldId, b3Pos origin, const b3Capsule* capsule, b3Vec3 translation,
+												b3QueryFilter filter )
+{
+	if ( capsule == NULL )
+	{
+		return (v3ClosestCastResult){ 0 };
+	}
+	b3ShapeProxy proxy = { .points = &capsule->center1, .count = 2, .radius = capsule->radius };
+	return v3World_CastShapeClosest( worldId, origin, &proxy, translation, filter );
+}
+
+v3ClosestCastResult v3World_CastBoxClosest( b3WorldId worldId, b3Pos origin, b3Vec3 center, b3Vec3 halfExtent, b3Vec3 translation,
+											b3QueryFilter filter )
+{
+	b3BoxHull box = b3MakeAxisAlignedBoxHull( halfExtent, center );
+	b3ShapeProxy proxy = { .points = box.boxPoints, .count = 8, .radius = 0.0f };
+	return v3World_CastShapeClosest( worldId, origin, &proxy, translation, filter );
+}
+
+v3ClosestCastResult v3World_CastHullClosest( b3WorldId worldId, b3Pos origin, const b3HullData* hull, b3Vec3 translation,
+											 b3QueryFilter filter )
+{
+	if ( hull == NULL )
+	{
+		return (v3ClosestCastResult){ 0 };
+	}
+	b3ShapeProxy proxy = { .points = b3GetHullPoints( hull ), .count = hull->vertexCount, .radius = 0.0f };
+	return v3World_CastShapeClosest( worldId, origin, &proxy, translation, filter );
 }

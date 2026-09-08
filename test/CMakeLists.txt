@@ -27,7 +27,17 @@ set(BOX3D_TEST_FILES
     test_sat.c
     test_shape.c
     test_table.c
+    test_v3_block_grid_contacts.c
+    test_v3_block_grid_world.c
+    test_v3_block_grid_landing.c
+    test_v3_block_grid_replace.c
+    test_v3_block_grid_sweep.c
+    test_v3_block_grid_motion.c
+    test_v3_block_grid_events.c
+	test_v3_block_grid_casts.c
+    test_v3_block_grid_entry.c
     test_v3_voxel.c
+    test_v3_world_limits.c
     test_world.c
 )
 
@@ -70,5 +80,15 @@ add_executable(v3_block_grid_cook_contract_cpp test_v3_block_grid_cook_contract.
 set_target_properties(v3_block_grid_cook_contract_cpp PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES CXX_EXTENSIONS NO)
 target_link_libraries(v3_block_grid_cook_contract_cpp PRIVATE box3d Threads::Threads)
 add_test(NAME v3_block_grid_cook_contract_cpp COMMAND v3_block_grid_cook_contract_cpp)
+
+add_executable(v3_block_grid_attach_contract_c test_v3_block_grid_attach_contract.c)
+set_target_properties(v3_block_grid_attach_contract_c PROPERTIES C_STANDARD 17 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_link_libraries(v3_block_grid_attach_contract_c PRIVATE box3d)
+add_test(NAME v3_block_grid_attach_contract_c COMMAND v3_block_grid_attach_contract_c)
+
+configure_file(test_v3_block_grid_package.cmake.in v3_block_grid_package_test.cmake @ONLY)
+add_test(NAME v3_block_grid_installed_package
+	COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/v3_block_grid_package_test.cmake)
+set_tests_properties(v3_block_grid_installed_package PROPERTIES LABELS "blockgrid;package" RUN_SERIAL TRUE)
 
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" PREFIX "" FILES ${BOX3D_TEST_FILES})

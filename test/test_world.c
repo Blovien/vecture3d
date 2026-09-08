@@ -10,6 +10,8 @@
 #include "box3d/constants.h"
 #include "box3d/math_functions.h"
 
+#include <float.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -1158,6 +1160,155 @@ static int TestContinuousMoveEvent( void )
 	return 0;
 }
 
+static double RunSafetyFactorWallCase( float velocity, bool isBullet, b3BodyType wallType )
+{
+	b3WorldDef worldDef = b3DefaultWorldDef();
+	worldDef.gravity = b3Vec3_zero;
+	worldDef.enableSleep = false;
+	b3WorldId worldId = b3CreateWorld( &worldDef );
+
+	b3BodyDef wallDef = b3DefaultBodyDef();
+	wallDef.type = wallType;
+	b3BodyId wallId = b3CreateBody( worldId, &wallDef );
+	b3BoxHull wall = b3MakeBoxHull( 0.01f, 5.0f, 5.0f );
+	b3ShapeDef wallShapeDef = b3DefaultShapeDef();
+	b3CreateHullShape( wallId, &wallShapeDef, &wall.base );
+
+	b3BodyDef bodyDef = b3DefaultBodyDef();
+	bodyDef.type = b3_dynamicBody;
+	bodyDef.position = (b3Pos){ -0.5f, 0.0f, 0.0f };
+	bodyDef.linearVelocity = (b3Vec3){ velocity, 0.0f, 0.0f };
+	bodyDef.gravityScale = 0.0f;
+	bodyDef.enableSleep = false;
+	bodyDef.safetyFactor = 10.0f;
+	bodyDef.isBullet = isBullet;
+	b3BodyId bodyId = b3CreateBody( worldId, &bodyDef );
+	b3ShapeDef shapeDef = b3DefaultShapeDef();
+	shapeDef.density = 1.0f;
+	b3Sphere sphere = { b3Vec3_zero, 0.1f };
+	b3CreateSphereShape( bodyId, &shapeDef, &sphere );
+
+	b3World_Step( worldId, 0.25f, 1 );
+	double x = b3Body_GetPosition( bodyId ).x;
+	b3DestroyWorld( worldId );
+	return x;
+}
+
+static int TestSafetyFactorWallBoundary( void )
+{
+	// Radius 0.1 and factor 10 produce a one-unit admission threshold. Starting at -0.5,
+	// motions at or below one unit tunnel through the thin wall because the comparison is strict.
+	ENSURE( RunSafetyFactorWallCase( nextafterf( 4.0f, 0.0f ), false, b3_staticBody ) > 0.4 );
+	ENSURE( RunSafetyFactorWallCase( 4.0f, false, b3_staticBody ) > 0.4 );
+
+	// The next representable velocity crosses the threshold and CCD stops the sphere at the wall.
+	double admittedX = RunSafetyFactorWallCase( nextafterf( 4.0f, FLT_MAX ), false, b3_staticBody );
+	ENSURE( -0.2 < admittedX && admittedX < 0.0 );
+
+	// A bullet still has to pass admission; its flag only expands the set of CCD targets afterward.
+	ENSURE( RunSafetyFactorWallCase( 4.0f, true, b3_staticBody ) > 0.4 );
+	double admittedBulletX = RunSafetyFactorWallCase( nextafterf( 4.0f, FLT_MAX ), true, b3_staticBody );
+	ENSURE( -0.2 < admittedBulletX && admittedBulletX < 0.0 );
+
+	// Once admitted, a non-bullet only checks static targets, while a bullet also checks kinematic targets.
+	float admittedVelocity = nextafterf( 4.0f, FLT_MAX );
+	ENSURE( RunSafetyFactorWallCase( admittedVelocity, false, b3_kinematicBody ) > 0.4 );
+	double bulletKinematicX = RunSafetyFactorWallCase( admittedVelocity, true, b3_kinematicBody );
+	ENSURE( -0.2 < bulletKinematicX && bulletKinematicX < 0.0 );
+
+	return 0;
+}
+
+static int TestFastConvexContactRecycling( void )
+{
+	b3WorldDef worldDef = b3DefaultWorldDef();
+	worldDef.gravity = b3Vec3_zero;
+	worldDef.enableSleep = false;
+	b3WorldId worldId = b3CreateWorld( &worldDef );
+
+	b3BoxHull box = b3MakeBoxHull( 0.5f, 0.5f, 0.5f );
+	b3ShapeDef shapeDef = b3DefaultShapeDef();
+	shapeDef.density = 1.0f;
+	b3BodyId bodies[2];
+	for ( int i = 0; i < 2; ++i )
+	{
+		b3BodyDef bodyDef = b3DefaultBodyDef();
+		bodyDef.type = b3_dynamicBody;
+		bodyDef.position = (b3Pos){ (float)i, 0.0f, 0.0f };
+		bodyDef.linearVelocity = (b3Vec3){ 0.0f, 0.0f, 30.0f };
+		bodyDef.enableSleep = false;
+		bodyDef.gravityScale = 0.0f;
+		bodies[i] = b3CreateBody( worldId, &bodyDef );
+		b3CreateHullShape( bodies[i], &shapeDef, &box.base );
+	}
+
+	const float timeStep = 1.0f / 60.0f;
+	b3World_Step( worldId, timeStep, 1 );
+	ENSURE( b3World_GetCounters( worldId ).contactCount == 1 );
+	ENSURE( b3World_GetCounters( worldId ).recycledContactCount == 0 );
+
+	// Box3D keeps its relative-pose recycler for convex contacts. This common fast motion is
+	// important for stable three-dimensional stacks and does not change the contact geometry.
+	b3World_Step( worldId, timeStep, 1 );
+	ENSURE( b3World_GetCounters( worldId ).recycledContactCount == 1 );
+
+	b3DestroyWorld( worldId );
+	return 0;
+}
+
+static int TestFastMeshContactRecycling( void )
+{
+	b3MeshData* mesh = b3CreateGridMesh( 4, 4, 1.0f, 0, true );
+	ENSURE( mesh != NULL );
+
+	b3WorldDef worldDef = b3DefaultWorldDef();
+	worldDef.gravity = b3Vec3_zero;
+	worldDef.enableSleep = false;
+	b3WorldId worldId = b3CreateWorld( &worldDef );
+
+	b3BodyDef groundDef = b3DefaultBodyDef();
+	b3BodyId groundId = b3CreateBody( worldId, &groundDef );
+	b3ShapeDef groundShapeDef = b3DefaultShapeDef();
+	b3CreateMeshShape( groundId, &groundShapeDef, mesh, b3Vec3_one );
+
+	b3BodyDef bodyDef = b3DefaultBodyDef();
+	bodyDef.type = b3_dynamicBody;
+	bodyDef.position = (b3Pos){ 0.0f, 0.5f, 0.0f };
+	bodyDef.enableSleep = false;
+	bodyDef.gravityScale = 0.0f;
+	b3BodyId bodyId = b3CreateBody( worldId, &bodyDef );
+	b3ShapeDef shapeDef = b3DefaultShapeDef();
+	shapeDef.density = 1.0f;
+	b3Sphere sphere = { b3Vec3_zero, 0.5f };
+	b3CreateSphereShape( bodyId, &shapeDef, &sphere );
+
+	const float timeStep = 1.0f / 60.0f;
+	b3World_Step( worldId, timeStep, 1 );
+	ENSURE( b3World_GetCounters( worldId ).contactCount == 1 );
+	b3World_Step( worldId, timeStep, 1 );
+	ENSURE( b3World_GetCounters( worldId ).recycledContactCount == 1 );
+
+	// Factor zero turns a tiny tangential motion into a fast body. The collide pass sees the
+	// prior-step flag, so the first fast and first recovery steps retain the one-step lag.
+	b3Body_SetSafetyFactor( bodyId, 0.0f );
+	b3Body_SetLinearVelocity( bodyId, (b3Vec3){ 0.001f, 0.0f, 0.0f } );
+	b3World_Step( worldId, timeStep, 1 );
+	ENSURE( b3World_GetCounters( worldId ).recycledContactCount == 1 );
+	b3World_Step( worldId, timeStep, 1 );
+	ENSURE( b3World_GetCounters( worldId ).recycledContactCount == 0 );
+
+	b3Body_SetSafetyFactor( bodyId, 0.5f );
+	b3Body_SetLinearVelocity( bodyId, b3Vec3_zero );
+	b3World_Step( worldId, timeStep, 1 );
+	ENSURE( b3World_GetCounters( worldId ).recycledContactCount == 0 );
+	b3World_Step( worldId, timeStep, 1 );
+	ENSURE( b3World_GetCounters( worldId ).recycledContactCount == 1 );
+
+	b3DestroyWorld( worldId );
+	b3DestroyMesh( mesh );
+	return 0;
+}
+
 int WorldTest( void )
 {
 	RUN_SUBTEST( HelloWorld );
@@ -1169,6 +1320,9 @@ int WorldTest( void )
 	RUN_SUBTEST( TestExplosion );
 	RUN_SUBTEST( TestSensor );
 	RUN_SUBTEST( TestContinuousMoveEvent );
+	RUN_SUBTEST( TestSafetyFactorWallBoundary );
+	RUN_SUBTEST( TestFastConvexContactRecycling );
+	RUN_SUBTEST( TestFastMeshContactRecycling );
 	RUN_SUBTEST( TestContactEvents );
 	RUN_SUBTEST( TestHitEvents );
 	RUN_SUBTEST( TestCompoundHitEvents );

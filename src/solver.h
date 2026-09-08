@@ -171,8 +171,20 @@ typedef struct b3JointPrepareSpan
 	b3JointSim* joints;
 } b3JointPrepareSpan;
 
+// One fast non-bullet body whose sweep against kinematic and dynamic BlockGrids was
+// deferred out of the finalize task. The pose is the one the body held before the
+// finalize pass advanced it, because that pass overwrites the body's own anchors.
+typedef struct b3DeferredGridSweep
+{
+	int bodySimIndex;
+	b3Pos startCenter;
+	b3Quat startRotation;
+} b3DeferredGridSweep;
+
+typedef struct b3StepContext b3StepContext;
+
 // Context for a time step. Recreated each time step.
-typedef struct b3StepContext
+struct b3StepContext
 {
 	// time step
 	float dt;
@@ -191,6 +203,7 @@ typedef struct b3StepContext
 
 	float restitutionThreshold;
 	float maxLinearVelocity;
+	float maxAngularVelocity;
 
 	struct b3World* world;
 	struct b3ConstraintGraph* graph;
@@ -208,6 +221,11 @@ typedef struct b3StepContext
 	// Array of bullet bodies that need continuous collision handling
 	int* bulletBodies;
 	b3AtomicInt bulletBodyCount;
+
+	// Fast non-bullet bodies whose BlockGrid sweep against the kinematic and dynamic
+	// trees was deferred out of the finalize task. See b3DeferredGridSweep.
+	b3DeferredGridSweep* deferredGridSweeps;
+	b3AtomicInt deferredGridSweepCount;
 
 	// Contact ids for simplified parallel-for access. Used in narrow-phase.
 	// These contacts may or may not be touching. They are associated with awake bodies.
@@ -257,9 +275,13 @@ typedef struct b3StepContext
 
 	// padding to prevent false sharing
 	char padding3[64];
-} b3StepContext;
+};
 
 void b3Solve( b3World* world, b3StepContext* stepContext );
+
+// Surface travel about the COM along free motion, without changing the supplied state.
+float b3ComputeFreeMotionDistance( const b3World* world, const b3BodySim* sim, const b3BodyState* initialState, float timeStep,
+								   int subStepCount );
 
 static inline b3Softness b3MakeSoft( float hertz, float zeta, float h )
 {

@@ -9,6 +9,9 @@
 
 #include "body.h"
 #include "physics_world.h"
+#include "v3_block_grid.h"
+#include "v3_block_grid_internal.h"
+#include "v3_block_grid_pair_world.h"
 #include "world_snapshot.h"
 
 #include "box3d/box3d.h"
@@ -17,6 +20,16 @@
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
+
+static bool b3RecIsStepOpcode( int opcode )
+{
+	return opcode == b3_recOpStep;
+}
+
+static bool b3RecIsFrameDigestOpcode( int opcode )
+{
+	return opcode == b3_recOpStateHash || opcode == b3_recOpContactEventHash || opcode == b3_recOpBlockGridCountersHash;
+}
 
 // Read primitives
 
@@ -428,6 +441,7 @@ b3BodyDef b3RecR_BODYDEF( b3RecReader* rdr )
 	def.angularDamping = b3RecR_F32( rdr );
 	def.gravityScale = b3RecR_F32( rdr );
 	def.sleepThreshold = b3RecR_F32( rdr );
+	def.safetyFactor = b3RecR_F32( rdr );
 	def.name = b3RecR_STR( rdr );
 	(void)b3RecR_U64( rdr ); // userData placeholder
 	def.motionLocks = b3RecR_LOCKS( rdr );
@@ -818,6 +832,16 @@ static void b3RecDispatch_WorldEnableSpeculative( const b3RecArgs_WorldEnableSpe
 	b3World_EnableSpeculative( rdr->replayWorldId, a->flag );
 }
 
+static void b3RecDispatch_WorldSetMaximumAngularSpeed( const b3RecArgs_WorldSetMaximumAngularSpeed* a, b3RecReader* rdr )
+{
+	b3World_SetMaximumAngularSpeed( rdr->replayWorldId, a->maximumAngularSpeed );
+}
+
+static void b3RecDispatch_WorldSetProjectileCandidateCap( const b3RecArgs_WorldSetProjectileCandidateCap* a, b3RecReader* rdr )
+{
+	b3World_SetProjectileCandidateCap( rdr->replayWorldId, a->projectileCandidateCap );
+}
+
 static void b3RecDispatch_CreateBody( const b3RecArgs_CreateBody* a, b3RecReader* rdr )
 {
 	b3BodyId recId = b3RecR_BODYID( rdr );
@@ -937,6 +961,11 @@ static void b3RecDispatch_BodyEnableSleep( const b3RecArgs_BodyEnableSleep* a, b
 static void b3RecDispatch_BodySetSleepThreshold( const b3RecArgs_BodySetSleepThreshold* a, b3RecReader* rdr )
 {
 	b3Body_SetSleepThreshold( b3RecMakeBodyId( rdr, a->body ), a->threshold );
+}
+
+static void b3RecDispatch_BodySetSafetyFactor( const b3RecArgs_BodySetSafetyFactor* a, b3RecReader* rdr )
+{
+	b3Body_SetSafetyFactor( b3RecMakeBodyId( rdr, a->body ), a->value );
 }
 
 static void b3RecDispatch_BodyDisable( const b3RecArgs_BodyDisable* a, b3RecReader* rdr )
@@ -1080,6 +1109,69 @@ static void b3RecDispatch_CreateCompoundShape( const b3RecArgs_CreateCompoundSha
 	b3ShapeDef shapeDef = a->def;
 	b3ShapeId gotId = b3CreateBakedCompoundShape( bodyId, &shapeDef, compound );
 	b3RecCheckShapeId( rdr, gotId, recId );
+}
+
+static void b3RecDispatch_CreateBlockGridShape( const b3RecArgs_CreateBlockGridShape* a, b3RecReader* rdr )
+{
+	b3ShapeId recId = b3RecR_SHAPEID( rdr );
+	if ( !rdr->ok )
+	{
+		return;
+	}
+	uint32_t id = a->geometryId;
+	if ( id >= (uint32_t)rdr->slotCount )
+	{
+		printf( "b3ReplayFile: block grid geometryId %u out of range\n", id );
+		rdr->ok = false;
+		return;
+	}
+
+	// Since the interned bytes are placement-free, each shape takes a copy at
+	// its own placement instead of sharing a single live payload the way
+	// compounds do, and the reference taken here stands for that copy while
+	// attachment adds one of its own.
+	b3RegistrySlot* slot = rdr->slots + id;
+	v3BlockGridData* grid = b3Alloc( (size_t)slot->byteCount );
+	memcpy( grid, slot->bytes, (size_t)slot->byteCount );
+	v3BlockGridAdoptRestored( grid );
+	v3BlockGridRestorePlacement( grid, a->originX, a->originY, a->originZ, a->placement );
+
+	b3BodyId bodyId = b3RecMakeBodyId( rdr, a->body );
+	b3ShapeDef shapeDef = a->def;
+	b3ShapeId gotId = v3CreateBlockGridShape( bodyId, &shapeDef, grid );
+
+	// Attachment took its own reference, so drop the construction one either way.
+	v3BlockGrid_Release( grid );
+	b3RecCheckShapeId( rdr, gotId, recId );
+}
+
+static void b3RecDispatch_ReplaceBlockGridShape( const b3RecArgs_ReplaceBlockGridShape* a, b3RecReader* rdr )
+{
+	uint32_t id = a->geometryId;
+	if ( id >= (uint32_t)rdr->slotCount )
+	{
+		printf( "b3ReplayFile: block grid geometryId %u out of range\n", id );
+		rdr->ok = false;
+		return;
+	}
+
+	// A copy at this op's own placement, for the same reason creation takes one:
+	// the interned bytes are placement-free and the trailer rides the op.
+	b3RegistrySlot* slot = rdr->slots + id;
+	v3BlockGridData* grid = b3Alloc( (size_t)slot->byteCount );
+	memcpy( grid, slot->bytes, (size_t)slot->byteCount );
+	v3BlockGridAdoptRestored( grid );
+	v3BlockGridRestorePlacement( grid, a->originX, a->originY, a->originZ, a->placement );
+
+	b3ShapeId shapeId = b3RecMakeShapeId( rdr, a->shape );
+	if ( v3ReplaceBlockGridShape( shapeId, grid, a->updateBodyMass ) != v3_blockGridReplaceOk )
+	{
+		printf( "b3ReplayFile: block grid replacement failed\n" );
+		rdr->ok = false;
+	}
+
+	// Publication took its own reference, so drop the construction one either way.
+	v3BlockGrid_Release( grid );
 }
 
 static void b3RecDispatch_DestroyShape( const b3RecArgs_DestroyShape* a, b3RecReader* rdr )
@@ -1682,6 +1774,31 @@ static void b3RecDispatch_StateHash( const b3RecArgs_StateHash* a, b3RecReader* 
 	if ( computed != a->hash )
 	{
 		printf( "b3ReplayFile: StateHash mismatch (recorded=0x%" PRIx64 ", computed=0x%" PRIx64 ")\n", a->hash, computed );
+		rdr->diverged = true;
+	}
+}
+
+static void b3RecDispatch_ContactEventHash( const b3RecArgs_ContactEventHash* a, b3RecReader* rdr )
+{
+	B3_UNUSED( a->world );
+	b3World* world = b3GetWorldFromId( rdr->replayWorldId );
+	uint64_t computed = b3HashContactEvents( world );
+	if ( computed != a->hash )
+	{
+		printf( "b3ReplayFile: ContactEventHash mismatch (recorded=0x%" PRIx64 ", computed=0x%" PRIx64 ")\n", a->hash, computed );
+		rdr->diverged = true;
+	}
+}
+
+static void b3RecDispatch_BlockGridCountersHash( const b3RecArgs_BlockGridCountersHash* a, b3RecReader* rdr )
+{
+	B3_UNUSED( a->world );
+	b3World* world = b3GetWorldFromId( rdr->replayWorldId );
+	uint64_t computed = b3HashBlockGridCounters( world );
+	if ( computed != a->hash )
+	{
+		printf( "b3ReplayFile: BlockGridCountersHash mismatch (recorded=0x%" PRIx64 ", computed=0x%" PRIx64 ")\n", a->hash,
+				computed );
 		rdr->diverged = true;
 	}
 }
@@ -2517,6 +2634,14 @@ static void b3RecFreeSlots( b3RegistrySlot* slots, int slotCount )
 				case b3_geometryCompound:
 					b3Free( slot->live, (size_t)slot->byteCount );
 					break;
+
+				case v3_geometryBlockGrid:
+					// Reference counted, so drop the registry's reference rather
+					// than freeing. Restored shapes hold their own, and the last
+					// release frees the payload.
+					v3BlockGrid_Release( (v3BlockGridData*)slot->live );
+					break;
+
 				default:
 					break;
 			}
@@ -2548,7 +2673,7 @@ static void b3RecScanFile( b3RecPlayer* player )
 		{
 			break;
 		}
-		if ( opcode == b3_recOpStep )
+		if ( b3RecIsStepOpcode( opcode ) )
 		{
 			frameCount += 1;
 			if ( !gotStep && payloadSize >= 12 )
@@ -2621,7 +2746,12 @@ static void b3RecCaptureKeyframe( b3RecPlayer* player )
 	int regCountBefore = player->keyframeRec->registry.entries.count;
 	B3_UNUSED( regCountBefore );
 
-	b3SerializeWorld( world, &buf, player->keyframeRec );
+	if ( b3SerializeWorld( world, &buf, player->keyframeRec ) < 0 )
+	{
+		player->rdr.ok = false;
+		b3RecBufFree( &buf );
+		return;
+	}
 	// Registry must not grow: all geometry was pre-seeded and the registry dedups exactly.
 	B3_ASSERT( player->keyframeRec->registry.entries.count == regCountBefore );
 
@@ -2759,6 +2889,12 @@ b3RecPlayer* b3CreatePlayer( const void* data, int size, int workerCount )
 	if ( hdr.bigEndian != 0 )
 	{
 		printf( "b3RecPlayer_Create: big-endian recording not supported\n" );
+		return NULL;
+	}
+	if ( hdr.materialPolicyKind != b3_contactMaterialPolicyBuiltin ||
+		 hdr.materialPolicyVersion != b3_contactMaterialPolicyBuiltinVersion )
+	{
+		printf( "b3RecPlayer_Create: unsupported material policy %u.%u\n", hdr.materialPolicyKind, hdr.materialPolicyVersion );
 		return NULL;
 	}
 
@@ -2979,9 +3115,8 @@ bool b3RecPlayer_StepFrame( b3RecPlayer* player )
 	player->frameQueryCount = 0;
 	player->frameHitCount = 0;
 
-	// A frame is its leading inputs (queries and between-step mutators), one Step, and the Step's
-	// trailing StateHash. Queries are recorded before the Step they belong to, so they stash here
-	// against the world state they were computed for.
+	// A frame contains its leading inputs, one step, and the state and event hashes from that step
+	// Queries arrive before their step, so they are collected against the current world state
 	bool stepped = false;
 	for ( ;; )
 	{
@@ -2991,10 +3126,8 @@ bool b3RecPlayer_StepFrame( b3RecPlayer* player )
 			return stepped;
 		}
 
-		// Once stepped, the StateHash is the only record still belonging to this frame. Anything else
-		// begins the next frame, so stop and let the next StepFrame consume it. Capture a keyframe at
-		// the boundary.
-		if ( stepped && player->rdr.data[player->rdr.cursor] != b3_recOpStateHash )
+		// After the step only its frame hashes remain, while any other record starts the next frame
+		if ( stepped && b3RecIsFrameDigestOpcode( player->rdr.data[player->rdr.cursor] ) == false )
 		{
 			if ( player->frame > player->lastKeyframeFrame && player->frame % player->keyframeInterval == 0 )
 			{
@@ -3014,12 +3147,12 @@ bool b3RecPlayer_StepFrame( b3RecPlayer* player )
 			player->atEnd = true;
 			return stepped;
 		}
-		if ( op == b3_recOpStep )
+		if ( b3RecIsStepOpcode( op ) )
 		{
 			player->frame += 1;
 			stepped = true;
 		}
-		else if ( op == b3_recOpStateHash ) // trailing record of the frame just stepped
+		else if ( b3RecIsFrameDigestOpcode( op ) )
 		{
 			// Latch the first frame whose state hash diverged. The hash belongs to the frame Step just
 			// advanced, so latch against the current frame, not the next Step which would be one late.
@@ -3045,9 +3178,8 @@ void b3RecPlayer_SubStepFrame( b3RecPlayer* player )
 		player->frameHitCount = 0;
 	}
 
-	// A frame is its leading inputs (queries and between-step mutators), one Step, and the Step's
-	// trailing StateHash. Queries are recorded before the Step they belong to, so they stash here
-	// against the world state they were computed for.
+	// A frame contains its leading inputs, one step, and the state and event hashes from that step
+	// Queries arrive before their step, so they are collected against the current world state
 	bool stepped = false;
 	bool haveCreateBodyOp = false;
 	for ( ;; )
@@ -3059,11 +3191,9 @@ void b3RecPlayer_SubStepFrame( b3RecPlayer* player )
 			return;
 		}
 
-		// Once stepped, the StateHash is the only record still belonging to this frame. Anything else
-		// begins the next frame, so stop and let the next StepFrame consume it. Capture a keyframe at
-		// the boundary.
+		// After the step only its frame hashes remain, while any other record starts the next frame
 		uint8_t currentOpCode = player->rdr.data[player->rdr.cursor];
-		if ( stepped && currentOpCode != b3_recOpStateHash )
+		if ( stepped && b3RecIsFrameDigestOpcode( currentOpCode ) == false )
 		{
 			if ( player->frame > player->lastKeyframeFrame && player->frame % player->keyframeInterval == 0 )
 			{
@@ -3072,7 +3202,7 @@ void b3RecPlayer_SubStepFrame( b3RecPlayer* player )
 			return;
 		}
 
-		if ( player->atPreStep == false && haveCreateBodyOp == true && currentOpCode == b3_recOpStep )
+		if ( player->atPreStep == false && haveCreateBodyOp == true && b3RecIsStepOpcode( currentOpCode ) )
 		{
 			player->atPreStep = true;
 			return;
@@ -3098,13 +3228,13 @@ void b3RecPlayer_SubStepFrame( b3RecPlayer* player )
 			haveCreateBodyOp = true;
 		}
 
-		if ( op == b3_recOpStep )
+		if ( b3RecIsStepOpcode( op ) )
 		{
 			player->atPreStep = false;
 			player->frame += 1;
 			stepped = true;
 		}
-		else if ( op == b3_recOpStateHash ) // trailing record of the frame just stepped
+		else if ( b3RecIsFrameDigestOpcode( op ) )
 		{
 			// Latch the first frame whose state hash diverged. The hash belongs to the frame Step just
 			// advanced, so latch against the current frame, not the next Step which would be one late.

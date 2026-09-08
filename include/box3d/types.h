@@ -164,7 +164,29 @@ typedef struct b3WorldDef
 	float contactSpeed;
 
 	/// Maximum linear speed. Usually meters per second.
+	/// @warning Motion is resolved at step boundaries. A body allowed to travel more than about one
+	/// cell per step can pass clean through one-cell-thick geometry, because the step that carries it
+	/// across leaves no overlap for the solver to see. One cell per step is the safe bound: sub-stepping
+	/// and speculative margin buy some room above it, and measured against a one-cell-thick BlockGrid
+	/// wall with four sub-steps a BlockGrid hull still stops at two cells per step and passes clean
+	/// through at three, but that margin is a property of the scene and not a guarantee. Bound this with
+	/// the smallest cell size the game builds from divided by the step length; the game owns the trade
+	/// between reach and speed.
 	float maximumLinearSpeed;
+
+	/// Maximum angular speed. Radians per second. Zero selects the Box3D default, which is the
+	/// existing per-step rotation clamp B3_MAX_ROTATION per step and therefore scales with the
+	/// step length; the sentinel is resolved at step time so the default stays B3_MAX_ROTATION per
+	/// step at every step length.
+	/// A body may still be exempted per body with b3BodyDef::allowFastRotation.
+	/// @warning The one cell per step consequence documented on maximumLinearSpeed applies to
+	/// rotation as well: a fast enough spin sweeps a far corner through thin geometry between steps.
+	float maximumAngularSpeed;
+
+	/// Maximum number of Projectile sweep candidates a single sweep may consider. Zero, the default,
+	/// means unlimited. Bounding this bounds sweep work per step at the cost of missing candidates
+	/// beyond the cap.
+	int projectileCandidateCap;
 
 	/// Optional mixing callback for friction. The default uses sqrt(frictionA * frictionB).
 	b3FrictionCallback* frictionCallback;
@@ -302,6 +324,14 @@ typedef struct b3BodyDef
 
 	/// Sleep speed threshold, default is 0.05 meters per second
 	float sleepThreshold;
+
+	/// Continuous collision safety factor. A dynamic body is considered fast when its full-step
+	/// point motion is greater than this factor times its minimum extent. Smaller values engage
+	/// continuous collision sooner but may increase work and visible motion hitches.
+	/// Non-dimensional. Recommended range [0.01, 0.5]. Default is 0.5. Any finite value greater
+	/// than or equal to zero is accepted; zero qualifies every body with non-zero measured motion.
+	/// Values above 0.5 delay continuous collision and reduce protection.
+	float safetyFactor;
 
 	/// Optional body name for debugging.
 	const char* name;
@@ -454,6 +484,13 @@ typedef enum b3ShapeType
 	/// A static voxel shape backed by immutable convex children
 	b3_voxelShape,
 
+	/// A BlockGrid, which holds immutable blocks alongside their exact hitboxes
+	/// and indexes both through 4x4x4 Occupancy Groups. It sits on any body
+	/// type, and because its mass is integrated over the blocks rather than the
+	/// bounds, a hollow dynamic grid weighs its shell instead of its box. It
+	/// collides against spheres, capsules, hulls and other BlockGrids.
+	v3_blockGridShape,
+
 	/// The number of shape types
 	b3_shapeTypeCount
 } b3ShapeType;
@@ -596,6 +633,44 @@ typedef struct b3Counters
 	int pushBackIterations;
 	int rootIterations;
 } b3Counters;
+
+/// The whole BlockGrid diagnostic surface: one saturating per-step counters struct.
+/// Every field counts the latest completed step only and clamps at UINT64_MAX rather than
+/// wrapping. The world keeps them as plain increments, so reading them is optional and
+/// leaving them unread costs nothing.
+/// @ingroup world
+typedef struct v3BlockGridPairCounters
+{
+	/// Candidate hitbox pairs the pair traversal enumerated.
+	uint64_t candidateHitboxPairCount;
+
+	/// Candidate hitbox pairs that produced a manifold. This is not the number of contacts.
+	uint64_t touchingPairCount;
+
+	/// BlockGrid pair contacts the pass selected.
+	uint64_t contactCount;
+
+	/// Projectile sweeps against a BlockGrid the continuous stage ran in the latest step.
+	/// One per fast convex shape swept against one BlockGrid shape, whatever the outcome.
+	uint64_t projectileSweepCount;
+
+	/// Sweeps of that count the candidate cap left without an answer, because it ran out
+	/// while a Hitbox that could still be reached sooner than the best impact found was
+	/// unvisited. Each one held its Projectile at the accepted fraction with its velocity
+	/// kept, rather than accepting an impact past the Hitbox it never looked at. Always
+	/// zero while b3WorldDef::projectileCandidateCap is zero, which is unlimited.
+	uint64_t capExhaustionCount;
+
+	/// BlockGrid revisions v3ReplaceBlockGridShape published since the previous step.
+	/// Replacement runs between steps, so a publication is visible after the next one.
+	uint64_t replacementPublishedCount;
+
+	/// Peak scratch bytes the pair pass took from the step arena.
+	uint64_t scratchPeakBytes;
+
+	/// Pair updates that reduced a fragmented contact to the bounded support subset in the latest step.
+	uint64_t contactReductionCount;
+} v3BlockGridPairCounters;
 //! @endcond
 
 /// Joint type enumeration. This is useful because all joint types use b3JointId and sometimes you

@@ -39,6 +39,15 @@ void b3WakeSolverSet( b3World* world, int setIndex )
 	b3SolverSet* set = b3Array_Get( world->solverSets, setIndex );
 	b3SolverSet* awakeSet = b3Array_Get( world->solverSets, b3_awakeSet );
 	b3SolverSet* disabledSet = b3Array_Get( world->solverSets, b3_disabledSet );
+	for ( int i = 0; i < set->contactIndices.count; ++i )
+	{
+		b3Contact* contact = b3Array_Get( world->contacts, set->contactIndices.data[i] );
+		if ( b3ContactStorageIsValid( contact ) == false )
+		{
+			B3_ASSERT( false );
+			return;
+		}
+	}
 
 	b3Body* bodies = world->bodies.data;
 
@@ -111,7 +120,11 @@ void b3WakeSolverSet( b3World* world, int setIndex )
 			B3_ASSERT( contact->flags & b3_contactTouchingFlag );
 			B3_ASSERT( contact->flags & b3_simTouchingFlag );
 			B3_ASSERT( contact->setIndex == setIndex );
-			b3AddContactToGraph( world, contact );
+			if ( b3AddContactToGraph( world, contact ) == false )
+			{
+				B3_ASSERT( false );
+				return;
+			}
 			contact->setIndex = b3_awakeSet;
 		}
 	}
@@ -324,7 +337,7 @@ void b3TrySleepIsland( b3World* world, int islandId )
 			b3Array_Push( sleepSet->contactIndices, contactId );
 
 			int localIndex = contact->localIndex;
-			if ( ( contact->flags & b3_simMeshContact ) || colorIndex == B3_OVERFLOW_INDEX )
+			if ( b3ContactKindUsesScalarSolver( (b3ContactKind)contact->kind ) || colorIndex == B3_OVERFLOW_INDEX )
 			{
 				int movedLocalIndex = b3Array_RemoveSwap( color->contacts, localIndex );
 				if ( movedLocalIndex != B3_NULL_INDEX )
@@ -543,7 +556,8 @@ void b3TransferBody( b3World* world, b3SolverSet* targetSet, b3SolverSet* source
 	memcpy( targetSim, sourceSim, sizeof( b3BodySim ) );
 
 	// Clear transient body flags
-	targetSim->flags &= ~( b3_isFast | b3_isSpeedCapped | b3_hadTimeOfImpact );
+	body->flags &= ~b3_bodyTransientFlags;
+	targetSim->flags &= ~b3_bodyTransientFlags;
 
 	// Remove body sim from solver set that owns it
 	int movedIndex = b3Array_RemoveSwap( sourceSet->bodySims, sourceIndex );

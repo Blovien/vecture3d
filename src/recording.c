@@ -9,7 +9,11 @@
 
 #include "body.h"
 #include "compound.h"
+#include "contact.h"
 #include "physics_world.h"
+#include "platform.h"
+#include "v3_block_grid_contact.h"
+#include "v3_block_grid_internal.h"
 #include "world_snapshot.h"
 
 #include "box3d/box3d.h"
@@ -320,7 +324,7 @@ static void b3RecW_STR( b3RecBuffer* buf, const char* s )
 // single-precision and double-precision sizes (equal for most), so either build configuration passes.
 _Static_assert( sizeof( void* ) != 8 || sizeof( b3ExplosionDef ) == 32 || sizeof( b3ExplosionDef ) == 48,
 				"b3ExplosionDef changed: update b3RecW_EXPLOSIONDEF and b3RecR_EXPLOSIONDEF together" );
-_Static_assert( sizeof( void* ) != 8 || sizeof( b3BodyDef ) == 104 || sizeof( b3BodyDef ) == 120,
+_Static_assert( sizeof( void* ) != 8 || sizeof( b3BodyDef ) == 112 || sizeof( b3BodyDef ) == 128,
 				"b3BodyDef changed: update b3RecW_BODYDEF and b3RecR_BODYDEF together" );
 _Static_assert( sizeof( void* ) != 8 || sizeof( b3ShapeDef ) == 120,
 				"b3ShapeDef changed: update b3RecW_SHAPEDEF and b3RecR_SHAPEDEF together" );
@@ -363,6 +367,7 @@ void b3RecW_BODYDEF( b3RecBuffer* buf, b3BodyDef v )
 	b3RecW_F32( buf, v.angularDamping );
 	b3RecW_F32( buf, v.gravityScale );
 	b3RecW_F32( buf, v.sleepThreshold );
+	b3RecW_F32( buf, v.safetyFactor );
 	b3RecW_STR( buf, v.name );
 	// userData: not preserved
 	b3RecW_U64( buf, 0u );
@@ -980,6 +985,13 @@ void b3RecAccumulateBounds( b3Recording* rec, b3AABB bounds )
 
 void b3StartRecordingIntoBuffer( b3World* world, b3Recording* recording )
 {
+	// Replay can rebuild the built-in material policy without serializing host function pointers
+	if ( b3WorldUsesBuiltinContactMaterialPolicy( world ) == false || world->preSolveFcn != NULL ||
+		 world->customFilterFcn != NULL )
+	{
+		return;
+	}
+
 	// Reset so a recording handle can be reused for a fresh session
 	recording->buffer.size = 0;
 	recording->recordStart = 0;
@@ -1007,6 +1019,8 @@ void b3StartRecordingIntoBuffer( b3World* world, b3Recording* recording )
 	hdr.bigEndian = 0;
 	hdr.validationEnabled = B3_ENABLE_VALIDATION ? 1u : 0u;
 	hdr.lengthScale = b3GetLengthUnitsPerMeter();
+	hdr.materialPolicyKind = b3_contactMaterialPolicyBuiltin;
+	hdr.materialPolicyVersion = b3_contactMaterialPolicyBuiltinVersion;
 	hdr.registryOffset = 0; // backpatched in b3StopRecordingInternal
 	hdr.registryByteCount = 0;
 
@@ -1016,7 +1030,12 @@ void b3StartRecordingIntoBuffer( b3World* world, b3Recording* recording )
 	// place and the world id stays stable across a restart or backward scrub. An empty world still
 	// serializes a valid blob, so there is no from-creation special case.
 	b3RecBuffer snapBuf = { 0 };
-	b3SerializeWorld( world, &snapBuf, recording );
+	if ( b3SerializeWorld( world, &snapBuf, recording ) < 0 )
+	{
+		world->recording = NULL;
+		b3RecBufFree( &snapBuf );
+		return;
+	}
 	hdr.snapshotSize = (uint64_t)snapBuf.size;
 
 	b3RecBufAppend( &recording->buffer, &hdr, (int)sizeof( hdr ) );
@@ -1184,10 +1203,179 @@ uint32_t b3RecInternCompound( b3Recording* rec, const b3CompoundData* compound )
 	return b3InternGeometry( &rec->registry, b3_geometryCompound, h, bytes, byteCount );
 }
 
+uint32_t b3RecInternBlockGrid( b3Recording* rec, const v3BlockGridData* grid )
+{
+	int byteCount = v3BlockGridSnapshotByteCount( grid );
+	uint8_t* bytes = b3Alloc( (size_t)byteCount );
+	memcpy( bytes, grid, (size_t)byteCount );
+
+	// Normalize the mutable trailer. Ownership and placement are not content, so
+	// zeroing them lets two placements of one assembly share a slot and keeps a
+	// live reference count out of the durable bytes.
+	v3BlockGridData* copy = (v3BlockGridData*)bytes;
+	b3AtomicStoreInt( &copy->referenceCount, 0 );
+	copy->worldOriginX = 0;
+	copy->worldOriginY = 0;
+	copy->worldOriginZ = 0;
+	copy->placement = 0;
+
+	uint64_t h = b3Hash64NonZero( bytes, byteCount );
+	return b3InternGeometry( &rec->registry, v3_geometryBlockGrid, h, bytes, byteCount );
+}
+
+static uint64_t b3HashMixU64( uint64_t hash, uint64_t value )
+{
+	return ( hash ^ value ) * B3_SNAP_FNV_PRIME;
+}
+
+static uint64_t b3HashMixFloat( uint64_t hash, float value )
+{
+	uint32_t bits;
+	memcpy( &bits, &value, sizeof( bits ) );
+	return b3HashMixU64( hash, bits );
+}
+
+static uint64_t b3HashMixVec3( uint64_t hash, b3Vec3 value )
+{
+	hash = b3HashMixFloat( hash, value.x );
+	hash = b3HashMixFloat( hash, value.y );
+	return b3HashMixFloat( hash, value.z );
+}
+
+static uint64_t b3HashMixShapeId( uint64_t hash, b3ShapeId id )
+{
+	hash = b3HashMixU64( hash, (uint32_t)id.index1 );
+	return b3HashMixU64( hash, id.generation );
+}
+
+static uint64_t b3HashMixContactId( uint64_t hash, b3ContactId id )
+{
+	hash = b3HashMixU64( hash, (uint32_t)id.index1 );
+	return b3HashMixU64( hash, id.generation );
+}
+
+static uint64_t b3HashMixManifold( uint64_t hash, const b3Manifold* manifold )
+{
+	hash = b3HashMixU64( hash, (uint32_t)manifold->pointCount );
+	hash = b3HashMixVec3( hash, manifold->normal );
+	hash = b3HashMixFloat( hash, manifold->twistImpulse );
+	hash = b3HashMixVec3( hash, manifold->frictionImpulse );
+	hash = b3HashMixVec3( hash, manifold->rollingImpulse );
+	for ( int i = 0; i < manifold->pointCount; ++i )
+	{
+		const b3ManifoldPoint* point = manifold->points + i;
+		hash = b3HashMixVec3( hash, point->anchorA );
+		hash = b3HashMixVec3( hash, point->anchorB );
+		hash = b3HashMixFloat( hash, point->separation );
+		hash = b3HashMixFloat( hash, point->baseSeparation );
+		hash = b3HashMixFloat( hash, point->normalImpulse );
+		hash = b3HashMixFloat( hash, point->totalNormalImpulse );
+		hash = b3HashMixFloat( hash, point->normalVelocity );
+		hash = b3HashMixU64( hash, point->featureId );
+		hash = b3HashMixU64( hash, (uint32_t)point->triangleIndex );
+		hash = b3HashMixU64( hash, point->persisted ? 1 : 0 );
+	}
+	return hash;
+}
+
+static uint64_t b3HashBlockSide( uint64_t hash, const v3BlockContactSide* side )
+{
+	hash = b3HashMixU64( hash, (uint32_t)side->bodyId.index1 );
+	hash = b3HashMixU64( hash, side->bodyId.generation );
+	hash = b3HashMixU64( hash, (uint32_t)side->shapeId.index1 );
+	hash = b3HashMixU64( hash, side->shapeId.generation );
+	hash = b3HashMixU64( hash, side->isBlockGrid );
+	hash = b3HashMixU64( hash, (uint32_t)side->cellX );
+	hash = b3HashMixU64( hash, (uint32_t)side->cellY );
+	hash = b3HashMixU64( hash, (uint32_t)side->cellZ );
+	hash = b3HashMixU64( hash, (uint32_t)side->subHitboxIndex );
+	hash = b3HashMixU64( hash, side->materialIndex );
+	hash = b3HashMixU64( hash, side->userMaterialId );
+	hash = b3HashMixU64( hash, side->userData );
+	return hash;
+}
+
+static uint64_t b3HashBlockEvent( uint64_t hash, const v3BlockContactEvent* event )
+{
+	hash = b3HashBlockSide( hash, &event->sideA );
+	hash = b3HashBlockSide( hash, &event->sideB );
+	hash = b3FnvMixPosition( hash, event->point );
+	hash = b3HashMixVec3( hash, event->normal );
+	hash = b3HashMixFloat( hash, event->normalImpulse );
+	return b3HashMixFloat( hash, event->approachSpeed );
+}
+
+uint64_t b3HashBlockGridCounters( const b3World* world )
+{
+	uint64_t hash = B3_SNAP_FNV_INIT;
+	hash = b3HashMixU64( hash, world->blockGridPairCounters.candidateHitboxPairCount );
+	hash = b3HashMixU64( hash, world->blockGridPairCounters.touchingPairCount );
+	hash = b3HashMixU64( hash, world->blockGridPairCounters.contactCount );
+	hash = b3HashMixU64( hash, world->blockGridPairCounters.projectileSweepCount );
+	hash = b3HashMixU64( hash, world->blockGridPairCounters.capExhaustionCount );
+	hash = b3HashMixU64( hash, world->blockGridPairCounters.replacementPublishedCount );
+	hash = b3HashMixU64( hash, world->blockGridPairCounters.scratchPeakBytes );
+	hash = b3HashMixU64( hash, world->blockGridPairCounters.contactReductionCount );
+	return hash;
+}
+
+uint64_t b3HashContactEvents( const b3World* world )
+{
+	uint64_t hash = B3_SNAP_FNV_INIT;
+	hash = b3HashMixU64( hash, (uint32_t)world->contactBeginEvents.count );
+	for ( int i = 0; i < world->contactBeginEvents.count; ++i )
+	{
+		const b3ContactBeginTouchEvent* event = world->contactBeginEvents.data + i;
+		hash = b3HashMixShapeId( hash, event->shapeIdA );
+		hash = b3HashMixShapeId( hash, event->shapeIdB );
+		hash = b3HashMixContactId( hash, event->contactId );
+	}
+
+	int endEventArrayIndex = 1 - world->endEventArrayIndex;
+	int endEventCount = world->contactEndEvents[endEventArrayIndex].count;
+	hash = b3HashMixU64( hash, (uint32_t)endEventCount );
+	for ( int i = 0; i < endEventCount; ++i )
+	{
+		const b3ContactEndTouchEvent* event = world->contactEndEvents[endEventArrayIndex].data + i;
+		hash = b3HashMixShapeId( hash, event->shapeIdA );
+		hash = b3HashMixShapeId( hash, event->shapeIdB );
+		hash = b3HashMixContactId( hash, event->contactId );
+	}
+
+	hash = b3HashMixU64( hash, (uint32_t)world->contactHitEvents.count );
+	for ( int i = 0; i < world->contactHitEvents.count; ++i )
+	{
+		const b3ContactHitEvent* event = world->contactHitEvents.data + i;
+		hash = b3HashMixShapeId( hash, event->shapeIdA );
+		hash = b3HashMixShapeId( hash, event->shapeIdB );
+		hash = b3HashMixContactId( hash, event->contactId );
+		hash = b3FnvMixPosition( hash, event->point );
+		hash = b3HashMixVec3( hash, event->normal );
+		hash = b3HashMixFloat( hash, event->approachSpeed );
+		hash = b3HashMixU64( hash, event->userMaterialIdA );
+		hash = b3HashMixU64( hash, event->userMaterialIdB );
+	}
+	int blockEnd = 1 - world->blockContactEndEventIndex;
+	const b3Array( v3BlockContactEvent ) *
+		arrays[] = { &world->blockContactBeginEvents, &world->blockContactHitEvents, world->blockContactEndEvents + blockEnd };
+	for ( int kind = 0; kind < 3; ++kind )
+	{
+		hash = b3HashMixU64( hash, (uint32_t)arrays[kind]->count );
+		for ( int i = 0; i < arrays[kind]->count; ++i )
+			hash = b3HashBlockEvent( hash, arrays[kind]->data + i );
+	}
+	hash = b3HashMixU64( hash, world->blockContactDroppedBeginCount );
+	hash = b3HashMixU64( hash, world->blockContactDroppedHitCount );
+	hash = b3HashMixU64( hash, world->blockContactDroppedEndCount[blockEnd] );
+	bool truncated = world->blockContactTransitionIncomplete || world->blockContactDroppedBeginCount != 0 ||
+					 world->blockContactDroppedHitCount != 0 || world->blockContactDroppedEndCount[blockEnd] != 0;
+	hash = b3HashMixU64( hash, truncated );
+	return hash;
+}
+
 uint64_t b3HashWorldState( b3World* world )
 {
 	uint64_t hash = B3_SNAP_FNV_INIT;
-	const uint64_t prime = B3_SNAP_FNV_PRIME;
 
 	int bodyCount = world->bodies.count;
 	for ( int i = 0; i < bodyCount; ++i )
@@ -1201,30 +1389,74 @@ uint64_t b3HashWorldState( b3World* world )
 
 		b3BodySim* sim = b3GetBodySim( world, body );
 
-		uint32_t bits;
-
-#define B3_HASH_FLOAT( f )                                                                                                       \
-	memcpy( &bits, &( f ), 4 );                                                                                                  \
-	hash = ( hash ^ (uint64_t)bits ) * prime;
-
 		hash = b3FnvMixPosition( hash, sim->transform.p );
-		B3_HASH_FLOAT( sim->transform.q.v.x )
-		B3_HASH_FLOAT( sim->transform.q.v.y )
-		B3_HASH_FLOAT( sim->transform.q.v.z )
-		B3_HASH_FLOAT( sim->transform.q.s )
+		hash = b3HashMixVec3( hash, sim->transform.q.v );
+		hash = b3HashMixFloat( hash, sim->transform.q.s );
 
 		b3BodyState* state = b3GetBodyState( world, body );
 		if ( state != NULL )
 		{
-			B3_HASH_FLOAT( state->linearVelocity.x )
-			B3_HASH_FLOAT( state->linearVelocity.y )
-			B3_HASH_FLOAT( state->linearVelocity.z )
-			B3_HASH_FLOAT( state->angularVelocity.x )
-			B3_HASH_FLOAT( state->angularVelocity.y )
-			B3_HASH_FLOAT( state->angularVelocity.z )
+			hash = b3HashMixVec3( hash, state->linearVelocity );
+			hash = b3HashMixVec3( hash, state->angularVelocity );
+		}
+	}
+
+	for ( int i = 0; i < world->contacts.count; ++i )
+	{
+		const b3Contact* contact = world->contacts.data + i;
+		if ( contact->contactId != i )
+		{
+			continue;
 		}
 
-#undef B3_HASH_FLOAT
+		hash = b3HashMixU64( hash, (uint32_t)i );
+		hash = b3HashMixU64( hash, (uint32_t)contact->shapeIdA );
+		hash = b3HashMixU64( hash, (uint32_t)contact->shapeIdB );
+		hash = b3HashMixU64( hash, contact->kind );
+		hash = b3HashMixU64( hash, contact->flags );
+		hash = b3HashMixU64( hash, (uint32_t)contact->setIndex );
+		hash = b3HashMixU64( hash, (uint32_t)contact->colorIndex );
+		hash = b3HashMixU64( hash, (uint32_t)contact->localIndex );
+		hash = b3HashMixU64( hash, (uint32_t)contact->islandId );
+		hash = b3HashMixU64( hash, (uint32_t)contact->islandIndex );
+		hash = b3HashMixU64( hash, contact->generation );
+		hash = b3HashMixU64( hash, contact->manifoldCount );
+		for ( int j = 0; j < contact->manifoldCount; ++j )
+		{
+			hash = b3HashMixManifold( hash, contact->manifolds + j );
+		}
+
+		if ( contact->kind != v3_blockGridPairContactKind )
+		{
+			continue;
+		}
+		const v3BlockGridPairControl* control = &contact->blockGridPair;
+		hash = b3HashMixU64( hash, control->sourceEpochA );
+		hash = b3HashMixU64( hash, control->sourceEpochB );
+		hash = b3HashMixU64( hash, control->correlationPolicy );
+		hash = b3HashMixU64( hash, control->lastOutcome );
+		if ( control->state == NULL )
+		{
+			continue;
+		}
+
+		const v3BlockGridPairPatch* patches = v3BlockGridPairPatches( control->state );
+		const b3ContactMaterial* materials = v3BlockGridPairContactMaterials( control->state );
+		for ( int j = 0; j < contact->manifoldCount; ++j )
+		{
+			const v3BlockGridPairPatch* patch = patches + j;
+			const b3ContactMaterial* material = materials + j;
+			hash = b3HashMixU64( hash, patch->supportRegionKey );
+			hash = b3HashMixU64( hash, patch->directedSatKey );
+			hash = b3HashMixFloat( hash, material->friction );
+			hash = b3HashMixFloat( hash, material->restitution );
+			hash = b3HashMixFloat( hash, material->rollingResistance );
+			hash = b3HashMixVec3( hash, material->tangentVelocity );
+			for ( int k = 0; k < contact->manifolds[j].pointCount; ++k )
+			{
+				hash = b3HashMixU64( hash, patch->hitboxPairKeys[k] );
+			}
+		}
 	}
 
 	return hash;

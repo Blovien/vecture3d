@@ -5,14 +5,22 @@
 #define _CRT_SECURE_NO_WARNINGS
 #endif
 
+#include "island.h"
 #include "physics_world.h"
 #include "recording.h"
 #include "test_macros.h"
+#include "v3_block_grid_contact.h"
+#include "vecture3d/block_grid.h"
 
 #include "box3d/box3d.h"
 #include "box3d/collision.h"
 
+#include <limits.h>
 #include <stdint.h>
+#include <stdlib.h>
+#if defined( _WIN32 )
+#include <malloc.h>
+#endif
 #include <stdio.h>
 #include <string.h>
 
@@ -66,6 +74,100 @@ static int SphereRoundTrip( void )
 
 	ENSURE( b3ValidateReplay( b3Recording_GetData( rec ), b3Recording_GetSize( rec ), 1 ) );
 
+	b3DestroyRecording( rec );
+	return 0;
+}
+
+static int SafetyFactorRoundTrip( void )
+{
+	b3Recording* rec = b3CreateRecording( 0 );
+	ENSURE( rec != NULL );
+
+	b3WorldDef worldDef = b3DefaultWorldDef();
+	worldDef.gravity = b3Vec3_zero;
+	b3WorldId worldId = b3CreateWorld( &worldDef );
+
+	b3ShapeDef shapeDef = b3DefaultShapeDef();
+	shapeDef.density = 1.0f;
+	b3Sphere sphere = { b3Vec3_zero, 0.5f };
+
+	// This body is captured by the seed snapshot.
+	b3BodyDef snapshotDef = b3DefaultBodyDef();
+	snapshotDef.type = b3_dynamicBody;
+	snapshotDef.safetyFactor = 0.125f;
+	b3BodyId snapshotBodyId = b3CreateBody( worldId, &snapshotDef );
+	b3CreateSphereShape( snapshotBodyId, &shapeDef, &sphere );
+
+	b3World_StartRecording( worldId, rec );
+
+	// This body exercises the widened body-definition payload.
+	b3BodyDef streamDef = b3DefaultBodyDef();
+	streamDef.type = b3_dynamicBody;
+	streamDef.position = (b3Pos){ 3.0f, 0.0f, 0.0f };
+	streamDef.safetyFactor = 0.1f;
+	b3BodyId streamBodyId = b3CreateBody( worldId, &streamDef );
+	b3CreateSphereShape( streamBodyId, &shapeDef, &sphere );
+	b3Body_SetSafetyFactor( snapshotBodyId, 0.25f );
+	b3World_Step( worldId, 1.0f / 60.0f, 1 );
+
+	// A second frame separates this setter opcode from body creation.
+	b3Body_SetSafetyFactor( streamBodyId, 0.4f );
+	b3World_Step( worldId, 1.0f / 60.0f, 1 );
+
+	b3World_StopRecording( worldId );
+	b3DestroyWorld( worldId );
+
+	const void* data = b3Recording_GetData( rec );
+	int size = b3Recording_GetSize( rec );
+	ENSURE( size >= (int)sizeof( b3RecHeader ) + 2 * (int)sizeof( uint32_t ) );
+	const b3RecHeader* header = data;
+	ENSURE( header->versionMajor == 15 );
+	ENSURE( header->snapshotSize >= 2 * sizeof( uint32_t ) );
+	uint32_t snapshotVersion = 0;
+	memcpy( &snapshotVersion, (const uint8_t*)data + sizeof( b3RecHeader ) + sizeof( uint32_t ), sizeof( snapshotVersion ) );
+	ENSURE( snapshotVersion == 10 );
+	ENSURE( b3ValidateReplay( data, size, 1 ) );
+
+	b3RecPlayer* player = b3CreatePlayer( data, size, 1 );
+	ENSURE( player != NULL );
+	ENSURE( b3RecPlayer_GetBodyCount( player ) == 1 );
+	b3BodyId replaySnapshotBody = b3RecPlayer_GetBodyId( player, 0 );
+	ENSURE( b3Body_GetSafetyFactor( replaySnapshotBody ) == 0.125f );
+
+	ENSURE( b3RecPlayer_StepFrame( player ) );
+	ENSURE( b3RecPlayer_GetBodyCount( player ) == 2 );
+	replaySnapshotBody = b3RecPlayer_GetBodyId( player, 0 );
+	b3BodyId replayStreamBody = b3RecPlayer_GetBodyId( player, 1 );
+	ENSURE( b3Body_GetSafetyFactor( replaySnapshotBody ) == 0.25f );
+	ENSURE( b3Body_GetSafetyFactor( replayStreamBody ) == 0.1f );
+
+	ENSURE( b3RecPlayer_StepFrame( player ) );
+	replayStreamBody = b3RecPlayer_GetBodyId( player, 1 );
+	ENSURE( b3Body_GetSafetyFactor( replayStreamBody ) == 0.4f );
+	ENSURE( b3RecPlayer_HasDiverged( player ) == false );
+
+	b3DestroyPlayer( player );
+
+	// Copy a real recording and change one version at a time. Old shape tags
+	// must be rejected even when the rest of the recording is valid.
+	uint8_t* oldVersion = b3Alloc( (size_t)size );
+	memcpy( oldVersion, data, (size_t)size );
+	b3RecHeader oldHeader;
+	memcpy( &oldHeader, oldVersion, sizeof( oldHeader ) );
+	oldHeader.versionMajor = 14;
+	memcpy( oldVersion, &oldHeader, sizeof( oldHeader ) );
+	ENSURE( b3CreatePlayer( oldVersion, size, 1 ) == NULL );
+	ENSURE( b3ValidateReplay( oldVersion, size, 1 ) == false );
+
+	memcpy( oldVersion, data, (size_t)size );
+	uint32_t oldSnapshotVersion = 9;
+	memcpy( oldVersion + sizeof( b3RecHeader ) + sizeof( uint32_t ), &oldSnapshotVersion, sizeof( oldSnapshotVersion ) );
+	ENSURE( b3CreatePlayer( oldVersion, size, 1 ) == NULL );
+	ENSURE( b3ValidateReplay( oldVersion, size, 1 ) == false );
+
+	memcpy( oldVersion, data, (size_t)size );
+	ENSURE( b3ValidateReplay( oldVersion, size, 1 ) );
+	b3Free( oldVersion, (size_t)size );
 	b3DestroyRecording( rec );
 	return 0;
 }
@@ -1197,6 +1299,7 @@ static int AllOps( void )
 	b3Body_SetAngularDamping( bodyId, 0.05f );
 	b3Body_SetGravityScale( bodyId, 0.9f );
 	b3Body_SetSleepThreshold( bodyId, 0.02f );
+	b3Body_SetSafetyFactor( bodyId, 0.25f );
 	b3Body_EnableSleep( bodyId, false );
 	b3Body_SetBullet( bodyId, true );
 	b3Body_EnableContactRecycling( bodyId, false );
@@ -1635,21 +1738,14 @@ static int ReservedHeaderBytes( void )
 	int recSize = b3Recording_GetSize( rec );
 	ENSURE( recSize >= (int)sizeof( b3RecHeader ) );
 
-	// Patch reserved fields at their byte offsets in b3RecHeader:
-	//   byte 11 : reserved  (uint8_t at offset 11)
-	//   bytes 16-19 : reserved2 (uint32_t at offset 16)
-	//   bytes 20-23 : reserved3 (uint32_t at offset 20)
 	uint8_t* patched = (uint8_t*)b3Alloc( (size_t)recSize );
 	memcpy( patched, recData, (size_t)recSize );
-	patched[11] = 0xAB;
-	patched[16] = 0xCD;
-	patched[17] = 0xEF;
-	patched[18] = 0x12;
-	patched[19] = 0x34;
-	patched[20] = 0x56;
-	patched[21] = 0x78;
-	patched[22] = 0x9A;
-	patched[23] = 0xBC;
+	// Mutate named reserved fields so a layout change cannot turn stale byte offsets into active-header corruption.
+	b3RecHeader patchedHeader;
+	memcpy( &patchedHeader, patched, sizeof( patchedHeader ) );
+	patchedHeader.reserved = 0xAB;
+	patchedHeader.reserved3 = 0xBC9A7856;
+	memcpy( patched, &patchedHeader, sizeof( patchedHeader ) );
 	ENSURE( b3ValidateReplay( patched, recSize, 1 ) );
 	b3Free( patched, (size_t)recSize );
 
@@ -2063,11 +2159,1839 @@ static int GeometryMutatorReplay( void )
 	return 0;
 }
 
+// One unit-cube revision per occupied column of a rectangular slab.
+static v3BlockGridData* CookReplaySlab( int width, int depth )
+{
+	v3BlockGridBox boxes[64];
+	v3BlockGridBlock blocks[64];
+	int count = 0;
+	for ( int z = 0; z < depth; ++z )
+	{
+		for ( int x = 0; x < width; ++x )
+		{
+			boxes[count] = (v3BlockGridBox){ .bounds = { { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f } } };
+			blocks[count] = (v3BlockGridBlock){
+				.x = x,
+				.z = z,
+				.userData = (uint64_t)count + 1,
+				.boxes = boxes + count,
+				.boxCount = 1,
+			};
+			count += 1;
+		}
+	}
+
+	b3SurfaceMaterial material = b3DefaultSurfaceMaterial();
+	material.friction = 0.8f;
+	v3BlockGridCookDef def = {
+		.materials = &material,
+		.materialCount = 1,
+		.blocks = blocks,
+		.blockCount = count,
+	};
+	v3BlockGridCookResult result = v3CookBlockGrid( &def );
+	return result.status == v3_blockGridCookOk ? result.data : NULL;
+}
+
+static v3BlockGridData* CookReplayStripedSlab( int width, int depth )
+{
+	v3BlockGridBox boxes[64];
+	v3BlockGridBlock blocks[64];
+	int count = 0;
+	for ( int z = 0; z < depth; ++z )
+	{
+		for ( int x = 0; x < width; ++x )
+		{
+			boxes[count] = (v3BlockGridBox){
+				.bounds = { { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f } },
+				.materialIndex = (uint32_t)( ( x + z ) & 1 ),
+			};
+			blocks[count] = (v3BlockGridBlock){
+				.x = x,
+				.z = z,
+				.userData = (uint64_t)count + 1,
+				.boxes = boxes + count,
+				.boxCount = 1,
+			};
+			count += 1;
+		}
+	}
+	b3SurfaceMaterial materials[2] = { b3DefaultSurfaceMaterial(), b3DefaultSurfaceMaterial() };
+	materials[0].friction = materials[1].friction = 0.8f;
+	materials[0].userMaterialId = 101;
+	materials[1].userMaterialId = 102;
+	v3BlockGridCookDef def = {
+		.materials = materials,
+		.materialCount = 2,
+		.blocks = blocks,
+		.blockCount = count,
+	};
+	v3BlockGridCookResult result = v3CookBlockGrid( &def );
+	return result.status == v3_blockGridCookOk ? result.data : NULL;
+}
+
+static v3BlockGridData* CookReplaySeparatedGrid( int xA, int xB )
+{
+	v3BlockGridBox boxes[2] = {
+		{ .bounds = { { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f } } },
+		{ .bounds = { { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f } } },
+	};
+	v3BlockGridBlock blocks[2] = {
+		{ .x = xA, .userData = 1, .boxes = boxes, .boxCount = 1 },
+		{ .x = xB, .userData = 2, .boxes = boxes + 1, .boxCount = 1 },
+	};
+	b3SurfaceMaterial material = b3DefaultSurfaceMaterial();
+	v3BlockGridCookDef def = {
+		.materials = &material,
+		.materialCount = 1,
+		.blocks = blocks,
+		.blockCount = 2,
+	};
+	v3BlockGridCookResult result = v3CookBlockGrid( &def );
+	return result.status == v3_blockGridCookOk ? result.data : NULL;
+}
+
+// A BlockGrid ship settling on BlockGrid terrain whose revision is optionally replaced part way
+// through. Returns the final state hash so the caller can prove the replacement moves the
+// simulation. Recording is optional so the same scene serves as the control.
+static uint64_t RunBlockGridReplaceScene( b3Recording* rec, bool replace, v3BlockGridData* wideTerrain,
+										  v3BlockGridData* narrowTerrain, v3BlockGridData* ship )
+{
+	b3WorldDef worldDef = b3DefaultWorldDef();
+	worldDef.workerCount = 1;
+	worldDef.gravity = (b3Vec3){ 0.0f, -10.0f, 0.0f };
+	worldDef.enableSleep = false;
+	b3WorldId worldId = b3CreateWorld( &worldDef );
+
+	if ( rec != NULL )
+	{
+		b3World_StartRecording( worldId, rec );
+	}
+
+	b3BodyDef terrainDef = b3DefaultBodyDef();
+	terrainDef.type = b3_staticBody;
+	b3BodyId terrainBodyId = b3CreateBody( worldId, &terrainDef );
+	b3ShapeDef terrainShapeDef = b3DefaultShapeDef();
+	b3ShapeId terrainShapeId = v3CreateBlockGridShape( terrainBodyId, &terrainShapeDef, wideTerrain );
+
+	b3BodyDef shipDef = b3DefaultBodyDef();
+	shipDef.type = b3_dynamicBody;
+	shipDef.position = (b3Pos){ 1.5, 3.0, 1.5 };
+	b3BodyId shipBodyId = b3CreateBody( worldId, &shipDef );
+	b3ShapeDef shipShapeDef = b3DefaultShapeDef();
+	shipShapeDef.density = 1.0f;
+	v3CreateBlockGridShape( shipBodyId, &shipShapeDef, ship );
+
+	float timeStep = 1.0f / 60.0f;
+	for ( int i = 0; i < 60; ++i )
+	{
+		b3World_Step( worldId, timeStep, 4 );
+	}
+
+	if ( replace )
+	{
+		v3ReplaceBlockGridShape( terrainShapeId, narrowTerrain, true );
+	}
+
+	for ( int i = 0; i < 60; ++i )
+	{
+		b3World_Step( worldId, timeStep, 4 );
+	}
+
+	uint64_t hash = b3HashWorldState( b3GetWorldFromId( worldId ) );
+
+	if ( rec != NULL )
+	{
+		b3World_StopRecording( worldId );
+	}
+	b3DestroyWorld( worldId );
+
+	return hash;
+}
+
+// Publishing a new BlockGrid revision is a world mutation like a hull or mesh swap and has to ride
+// the stream, with the new geometry interned at the record site. The control run proves the
+// replacement moves the simulation, so the replay gate has teeth.
+static int BlockGridReplaceReplay( void )
+{
+	v3BlockGridData* wideTerrain = CookReplaySlab( 6, 6 );
+	v3BlockGridData* narrowTerrain = CookReplaySlab( 3, 3 );
+	v3BlockGridData* ship = CookReplaySlab( 2, 2 );
+	ENSURE( wideTerrain != NULL && narrowTerrain != NULL && ship != NULL );
+
+	uint64_t controlHash = RunBlockGridReplaceScene( NULL, false, wideTerrain, narrowTerrain, ship );
+
+	b3Recording* rec = b3CreateRecording( 0 );
+	ENSURE( rec != NULL );
+	uint64_t replacedHash = RunBlockGridReplaceScene( rec, true, wideTerrain, narrowTerrain, ship );
+
+	// Without this the replay gate below could pass on a recording that never carried the op.
+	ENSURE( replacedHash != controlHash );
+
+	const uint8_t* data = b3Recording_GetData( rec );
+	int size = b3Recording_GetSize( rec );
+	ENSURE( size > 0 );
+
+	b3RecPlayer* player = b3CreatePlayer( data, size, 1 );
+	ENSURE( player != NULL );
+	while ( b3RecPlayer_StepFrame( player ) )
+	{
+	}
+	ENSURE( b3RecPlayer_HasDiverged( player ) == false );
+
+	uint64_t replayHash = b3HashWorldState( b3GetWorldFromId( b3RecPlayer_GetWorldId( player ) ) );
+	printf( "  block grid replace hash recorded 0x%016llx replay 0x%016llx control 0x%016llx\n", (unsigned long long)replacedHash,
+			(unsigned long long)replayHash, (unsigned long long)controlHash );
+	ENSURE( replayHash == replacedHash );
+
+	b3DestroyPlayer( player );
+	b3DestroyRecording( rec );
+	v3DestroyBlockGridData( wideTerrain );
+	v3DestroyBlockGridData( narrowTerrain );
+	v3DestroyBlockGridData( ship );
+	return 0;
+}
+
+// Public observations are copied before their borrowed views expire. World slots
+// are checked separately, then normalized while body/shape generations survive.
+typedef struct ReplayEvents
+{
+	v3BlockContactEvent begin[256], hit[256], end[256];
+	int beginCount, hitCount, endCount;
+	uint32_t droppedBegin, droppedHit, droppedEnd;
+	bool truncated;
+	v3BlockGridPairCounters counters;
+	b3ContactEndTouchEvent nativeEnd[512];
+	int nativeEndCount;
+} ReplayEvents;
+
+static void NormalizeReplayEvent( v3BlockContactEvent* e )
+{
+	e->sideA.bodyId.world0 = e->sideA.shapeId.world0 = 0;
+	e->sideB.bodyId.world0 = e->sideB.shapeId.world0 = 0;
+}
+
+static int CaptureReplayEvents( b3WorldId world, ReplayEvents* frame )
+{
+	v3BlockContactEvents e = v3World_GetBlockContactEvents( world );
+	ENSURE( e.beginCount <= 256 && e.hitCount <= 256 && e.endCount <= 256 );
+	frame->beginCount = e.beginCount;
+	frame->hitCount = e.hitCount;
+	frame->endCount = e.endCount;
+	frame->droppedBegin = e.droppedBeginCount;
+	frame->droppedHit = e.droppedHitCount;
+	frame->droppedEnd = e.droppedEndCount;
+	frame->truncated = e.truncated;
+	const v3BlockContactEvent* sources[] = { e.beginEvents, e.hitEvents, e.endEvents };
+	v3BlockContactEvent* destinations[] = { frame->begin, frame->hit, frame->end };
+	int counts[] = { e.beginCount, e.hitCount, e.endCount };
+	for ( int kind = 0; kind < 3; ++kind )
+	{
+		for ( int i = 0; i < counts[kind]; ++i )
+		{
+			v3BlockContactEvent event = sources[kind][i];
+			ENSURE( event.sideA.shapeId.world0 == world.index1 - 1 && event.sideB.shapeId.world0 == world.index1 - 1 );
+			ENSURE( event.sideA.bodyId.world0 == world.index1 - 1 && event.sideB.bodyId.world0 == world.index1 - 1 );
+			NormalizeReplayEvent( &event );
+			destinations[kind][i] = event;
+		}
+	}
+	frame->counters = v3World_GetBlockGridPairCounters( world );
+	b3ContactEvents native = b3World_GetContactEvents( world );
+	ENSURE( native.endCount <= 512 );
+	frame->nativeEndCount = native.endCount;
+	for ( int i = 0; i < native.endCount; ++i )
+	{
+		b3ContactEndTouchEvent event = native.endEvents[i];
+		ENSURE( event.shapeIdA.world0 == world.index1 - 1 && event.shapeIdB.world0 == world.index1 - 1 );
+		ENSURE( event.contactId.world0 == world.index1 - 1 );
+		event.shapeIdA.world0 = event.shapeIdB.world0 = event.contactId.world0 = 0;
+		frame->nativeEnd[i] = event;
+	}
+	return 0;
+}
+
+static int CompareReplaySide( const v3BlockContactSide* a, const v3BlockContactSide* b )
+{
+	ENSURE( B3_ID_EQUALS( a->bodyId, b->bodyId ) && B3_ID_EQUALS( a->shapeId, b->shapeId ) );
+	ENSURE( a->isBlockGrid == b->isBlockGrid );
+	ENSURE( a->cellX == b->cellX && a->cellY == b->cellY && a->cellZ == b->cellZ );
+	ENSURE( a->subHitboxIndex == b->subHitboxIndex && a->materialIndex == b->materialIndex );
+	ENSURE( a->userMaterialId == b->userMaterialId && a->userData == b->userData );
+	return 0;
+}
+
+static int CompareReplayEvents( const ReplayEvents* a, const ReplayEvents* b )
+{
+	ENSURE( a->beginCount == b->beginCount && a->hitCount == b->hitCount && a->endCount == b->endCount );
+	ENSURE( a->droppedBegin == b->droppedBegin && a->droppedHit == b->droppedHit && a->droppedEnd == b->droppedEnd );
+	ENSURE( a->truncated == b->truncated );
+	const v3BlockContactEvent* left[] = { a->begin, a->hit, a->end };
+	const v3BlockContactEvent* right[] = { b->begin, b->hit, b->end };
+	int counts[] = { a->beginCount, a->hitCount, a->endCount };
+	for ( int kind = 0; kind < 3; ++kind )
+	{
+		for ( int i = 0; i < counts[kind]; ++i )
+		{
+			const v3BlockContactEvent* x = left[kind] + i;
+			const v3BlockContactEvent* y = right[kind] + i;
+			ENSURE( CompareReplaySide( &x->sideA, &y->sideA ) == 0 && CompareReplaySide( &x->sideB, &y->sideB ) == 0 );
+			ENSURE( x->point.x == y->point.x && x->point.y == y->point.y && x->point.z == y->point.z );
+			ENSURE( x->normal.x == y->normal.x && x->normal.y == y->normal.y && x->normal.z == y->normal.z );
+			ENSURE( x->normalImpulse == y->normalImpulse && x->approachSpeed == y->approachSpeed );
+		}
+	}
+#define CHECK_COUNTER( field ) ENSURE( a->counters.field == b->counters.field )
+	CHECK_COUNTER( candidateHitboxPairCount );
+	CHECK_COUNTER( touchingPairCount );
+	CHECK_COUNTER( contactCount );
+	CHECK_COUNTER( projectileSweepCount );
+	CHECK_COUNTER( capExhaustionCount );
+	CHECK_COUNTER( replacementPublishedCount );
+	CHECK_COUNTER( scratchPeakBytes );
+	CHECK_COUNTER( contactReductionCount );
+#undef CHECK_COUNTER
+	ENSURE( a->nativeEndCount == b->nativeEndCount );
+	for ( int i = 0; i < a->nativeEndCount; ++i )
+	{
+		ENSURE( B3_ID_EQUALS( a->nativeEnd[i].shapeIdA, b->nativeEnd[i].shapeIdA ) );
+		ENSURE( B3_ID_EQUALS( a->nativeEnd[i].shapeIdB, b->nativeEnd[i].shapeIdB ) );
+		ENSURE( B3_ID_EQUALS( a->nativeEnd[i].contactId, b->nativeEnd[i].contactId ) );
+	}
+	return 0;
+}
+
+typedef struct ReplacementCapacityView
+{
+	uint64_t pairBytes;
+	uint32_t pairCapacityBytes;
+	int manifoldCount;
+	int nativeBeginCapacity;
+	int nativeEndCapacities[2];
+	int awakeContactCapacity;
+	int graphConvexCapacities[B3_GRAPH_COLOR_COUNT];
+	int graphContactCapacities[B3_GRAPH_COLOR_COUNT];
+	int moveCapacity;
+	int moveCount;
+	int treeRebuildCapacities[b3_bodyTypeCount];
+	uint8_t treeScratchMasks[b3_bodyTypeCount];
+	int taskCount;
+	int arenaCapacities[B3_MAX_WORKERS];
+	int arenaOverflowCapacities[B3_MAX_WORKERS];
+	int arenaPeaks[B3_MAX_WORKERS];
+	int islandSlotCount;
+	int islandContactCapacities[64];
+	int islandContactCounts[64];
+} ReplacementCapacityView;
+
+static ReplacementCapacityView CaptureReplacementCapacities( b3WorldId worldId )
+{
+	b3World* world = b3GetWorldFromId( worldId );
+	ReplacementCapacityView view = { 0 };
+	view.pairBytes = world->blockGridPairBytes;
+	view.nativeBeginCapacity = world->contactBeginEvents.capacity;
+	view.nativeEndCapacities[0] = world->contactEndEvents[0].capacity;
+	view.nativeEndCapacities[1] = world->contactEndEvents[1].capacity;
+	view.awakeContactCapacity = world->solverSets.data[b3_awakeSet].contactIndices.capacity;
+	view.moveCapacity = world->broadPhase.moveArray.capacity;
+	view.moveCount = world->broadPhase.moveArray.count;
+	for ( int type = 0; type < b3_bodyTypeCount; ++type )
+	{
+		const b3DynamicTree* tree = world->broadPhase.trees + type;
+		view.treeRebuildCapacities[type] = tree->rebuildCapacity;
+		view.treeScratchMasks[type] = ( tree->leafIndices != NULL ? 1u : 0u ) | ( tree->leafBoxes != NULL ? 2u : 0u ) |
+									  ( tree->leafCenters != NULL ? 4u : 0u ) | ( tree->binIndices != NULL ? 8u : 0u );
+	}
+	view.taskCount = world->taskContexts.count;
+	for ( int i = 0; i < world->taskContexts.count && i < B3_MAX_WORKERS; ++i )
+	{
+		const b3Arena* arena = &world->taskContexts.data[i].arena;
+		view.arenaCapacities[i] = arena->capacity;
+		view.arenaOverflowCapacities[i] = arena->shared->overflows.capacity;
+		view.arenaPeaks[i] = arena->shared->peakDemand;
+	}
+	view.islandSlotCount = world->islands.count <= ARRAY_COUNT( view.islandContactCapacities ) ? world->islands.count : -1;
+	for ( int i = 0; i < view.islandSlotCount; ++i )
+	{
+		view.islandContactCapacities[i] = world->islands.data[i].contacts.capacity;
+		view.islandContactCounts[i] = world->islands.data[i].contacts.count;
+	}
+	for ( int color = 0; color < B3_GRAPH_COLOR_COUNT; ++color )
+	{
+		view.graphConvexCapacities[color] = world->constraintGraph.colors[color].convexContacts.capacity;
+		view.graphContactCapacities[color] = world->constraintGraph.colors[color].contacts.capacity;
+	}
+	for ( int i = 0; i < world->contacts.count; ++i )
+	{
+		b3Contact* contact = world->contacts.data + i;
+		if ( contact->contactId == i && contact->kind == v3_blockGridPairContactKind )
+		{
+			view.pairCapacityBytes = v3BlockGridPairCapacityBytes( contact->blockGridPair.state );
+			view.manifoldCount = v3BlockGridPairManifoldCount( contact->blockGridPair.state );
+			break;
+		}
+	}
+	return view;
+}
+
+static int CompareReplacementCapacities( const ReplacementCapacityView* a, const ReplacementCapacityView* b )
+{
+	ENSURE( a->pairBytes == b->pairBytes && a->pairCapacityBytes == b->pairCapacityBytes );
+	ENSURE( a->manifoldCount == b->manifoldCount );
+	ENSURE( a->nativeBeginCapacity == b->nativeBeginCapacity );
+	ENSURE( a->nativeEndCapacities[0] == b->nativeEndCapacities[0] && a->nativeEndCapacities[1] == b->nativeEndCapacities[1] );
+	ENSURE( a->awakeContactCapacity == b->awakeContactCapacity );
+	ENSURE( a->moveCapacity == b->moveCapacity && a->moveCount == b->moveCount );
+	for ( int type = 0; type < b3_bodyTypeCount; ++type )
+	{
+		ENSURE( a->treeRebuildCapacities[type] == b->treeRebuildCapacities[type] );
+		ENSURE( a->treeScratchMasks[type] == b->treeScratchMasks[type] );
+	}
+	ENSURE( a->taskCount == b->taskCount );
+	for ( int i = 0; i < a->taskCount; ++i )
+	{
+		ENSURE( a->arenaCapacities[i] == b->arenaCapacities[i] );
+		ENSURE( a->arenaOverflowCapacities[i] == b->arenaOverflowCapacities[i] );
+		ENSURE( a->arenaPeaks[i] == b->arenaPeaks[i] );
+	}
+	ENSURE( a->islandSlotCount >= 0 && a->islandSlotCount == b->islandSlotCount );
+	for ( int i = 0; i < a->islandSlotCount; ++i )
+	{
+		ENSURE( a->islandContactCapacities[i] == b->islandContactCapacities[i] );
+		ENSURE( a->islandContactCounts[i] == b->islandContactCounts[i] );
+	}
+	for ( int color = 0; color < B3_GRAPH_COLOR_COUNT; ++color )
+	{
+		ENSURE( a->graphConvexCapacities[color] == b->graphConvexCapacities[color] );
+		ENSURE( a->graphContactCapacities[color] == b->graphContactCapacities[color] );
+	}
+	return 0;
+}
+
+static int GrowReplacementReplayCapacities( b3World* world, const ReplacementCapacityView* seed )
+{
+	b3Array_Reserve( world->contactBeginEvents, world->contactBeginEvents.capacity + 1 );
+	for ( int i = 0; i < 2; ++i )
+	{
+		b3Array_Reserve( world->contactEndEvents[i], world->contactEndEvents[i].capacity + 1 );
+	}
+	b3Array_Reserve( world->solverSets.data[b3_awakeSet].contactIndices,
+					 world->solverSets.data[b3_awakeSet].contactIndices.capacity + 1 );
+	b3Array_Reserve( world->broadPhase.moveArray, world->broadPhase.moveArray.capacity + 1 );
+
+	b3DynamicTree* tree = world->broadPhase.trees + b3_dynamicBody;
+	int treeCapacity = tree->rebuildCapacity + 1;
+	b3Free( tree->leafIndices, (size_t)tree->rebuildCapacity * sizeof( int ) );
+	b3Free( tree->leafBoxes, (size_t)tree->rebuildCapacity * sizeof( b3AABB ) );
+	b3Free( tree->leafCenters, (size_t)tree->rebuildCapacity * sizeof( b3Vec3 ) );
+	b3Free( tree->binIndices, (size_t)tree->rebuildCapacity * sizeof( int ) );
+	tree->leafIndices = b3Alloc( (size_t)treeCapacity * sizeof( int ) );
+	tree->leafBoxes = NULL;
+	tree->leafCenters = b3Alloc( (size_t)treeCapacity * sizeof( b3Vec3 ) );
+	tree->binIndices = NULL;
+	tree->rebuildCapacity = treeCapacity;
+
+	for ( int i = 0; i < world->taskContexts.count; ++i )
+	{
+		b3Arena* arena = &world->taskContexts.data[i].arena;
+		int arenaCapacity = arena->capacity + 1;
+		int overflowCapacity = arena->shared->overflows.capacity + 1;
+		b3DestroyArena( arena );
+		*arena = b3CreateArena( arenaCapacity );
+		b3Array_Reserve( arena->shared->overflows, overflowCapacity );
+	}
+
+	for ( int i = 0; i < world->islands.count; ++i )
+	{
+		b3Island* island = world->islands.data + i;
+		if ( island->islandId == i )
+		{
+			b3Array_Reserve( island->contacts, island->contacts.capacity + 1 );
+		}
+	}
+	for ( int color = 0; color < B3_GRAPH_COLOR_COUNT; ++color )
+	{
+		b3GraphColor* graphColor = world->constraintGraph.colors + color;
+		b3Array_Reserve( graphColor->convexContacts, graphColor->convexContacts.capacity + 1 );
+		b3Array_Reserve( graphColor->contacts, graphColor->contacts.capacity + 1 );
+	}
+
+	ReplacementCapacityView grown = CaptureReplacementCapacities( (b3WorldId){ world->worldId + 1, world->generation } );
+	ENSURE( grown.nativeBeginCapacity > seed->nativeBeginCapacity );
+	ENSURE( grown.nativeEndCapacities[0] > seed->nativeEndCapacities[0] &&
+			grown.nativeEndCapacities[1] > seed->nativeEndCapacities[1] );
+	ENSURE( grown.awakeContactCapacity > seed->awakeContactCapacity && grown.moveCapacity > seed->moveCapacity );
+	ENSURE( grown.treeRebuildCapacities[b3_dynamicBody] > seed->treeRebuildCapacities[b3_dynamicBody] );
+	ENSURE( grown.arenaCapacities[0] > seed->arenaCapacities[0] &&
+			grown.arenaOverflowCapacities[0] > seed->arenaOverflowCapacities[0] );
+	bool grewIsland = false;
+	for ( int i = 0; i < grown.islandSlotCount; ++i )
+	{
+		grewIsland = grewIsland || grown.islandContactCapacities[i] > seed->islandContactCapacities[i];
+	}
+	ENSURE( grewIsland );
+	for ( int color = 0; color < B3_GRAPH_COLOR_COUNT; ++color )
+	{
+		ENSURE( grown.graphConvexCapacities[color] > seed->graphConvexCapacities[color] );
+		ENSURE( grown.graphContactCapacities[color] > seed->graphContactCapacities[color] );
+	}
+	return 0;
+}
+
+static b3ContactId RecordingTouchingContactId( b3ShapeId shapeId, b3ShapeId otherShapeId )
+{
+	b3ContactData contacts[16];
+	int count = b3Shape_GetContactData( shapeId, contacts, ARRAY_COUNT( contacts ) );
+	for ( int i = 0; i < count; ++i )
+	{
+		bool samePair = ( B3_ID_EQUALS( contacts[i].shapeIdA, shapeId ) && B3_ID_EQUALS( contacts[i].shapeIdB, otherShapeId ) ) ||
+						( B3_ID_EQUALS( contacts[i].shapeIdA, otherShapeId ) && B3_ID_EQUALS( contacts[i].shapeIdB, shapeId ) );
+		if ( samePair && contacts[i].manifoldCount > 0 )
+		{
+			return contacts[i].contactId;
+		}
+	}
+	return b3_nullContactId;
+}
+
+static int replacementReplayAllocationCount;
+static int replacementReplayFreeCount;
+
+static void* ReplacementReplayAlloc( int size, int alignment )
+{
+	replacementReplayAllocationCount += 1;
+#if defined( _WIN32 )
+	return _aligned_malloc( size, alignment );
+#else
+	return aligned_alloc( alignment, size );
+#endif
+}
+
+static void ReplacementReplayFree( void* memory )
+{
+	replacementReplayFreeCount += 1;
+#if defined( _WIN32 )
+	_aligned_free( memory );
+#else
+	free( memory );
+#endif
+}
+
+static void BeginReplacementReplayMeasurement( void )
+{
+	replacementReplayAllocationCount = 0;
+	replacementReplayFreeCount = 0;
+	b3SetAllocator( ReplacementReplayAlloc, ReplacementReplayFree );
+}
+
+static void EndReplacementReplayMeasurement( void )
+{
+	b3SetAllocator( NULL, NULL );
+}
+
+enum
+{
+	replacementMoveCapacityMarker = 50021,
+	replacementTreeCapacityMarker = 50023,
+	replacementArenaCapacityMarker = 8000039,
+	replacementOverflowCapacityMarker = 50047,
+	replacementIslandCapacityMarker = 50051,
+};
+
+static int PrepareReplacementCapacityMarkers( b3World* world )
+{
+	b3Array_Reserve( world->broadPhase.moveArray, replacementMoveCapacityMarker );
+
+	b3DynamicTree* tree = world->broadPhase.trees + b3_dynamicBody;
+	b3Free( tree->leafIndices, tree->rebuildCapacity * (int)sizeof( int ) );
+	b3Free( tree->leafBoxes, tree->rebuildCapacity * (int)sizeof( b3AABB ) );
+	b3Free( tree->leafCenters, tree->rebuildCapacity * (int)sizeof( b3Vec3 ) );
+	b3Free( tree->binIndices, tree->rebuildCapacity * (int)sizeof( int ) );
+	tree->leafIndices = b3Alloc( replacementTreeCapacityMarker * (int)sizeof( int ) );
+	tree->leafBoxes = NULL;
+	tree->leafCenters = b3Alloc( replacementTreeCapacityMarker * (int)sizeof( b3Vec3 ) );
+	tree->binIndices = NULL;
+	tree->rebuildCapacity = replacementTreeCapacityMarker;
+
+	b3Arena* arena = &world->taskContexts.data[0].arena;
+	b3DestroyArena( arena );
+	*arena = b3CreateArena( replacementArenaCapacityMarker );
+	b3Array_Reserve( arena->shared->overflows, replacementOverflowCapacityMarker );
+	arena->shared->peakDemand = 1234;
+
+	for ( int i = 0; i < world->islands.count; ++i )
+	{
+		b3Island* island = world->islands.data + i;
+		if ( island->islandId == i )
+		{
+			b3Array_Reserve( island->contacts, replacementIslandCapacityMarker );
+			return 0;
+		}
+	}
+	return 1;
+}
+
+static int FindSnapshotMarker( const b3Recording* recording, int marker )
+{
+	const uint8_t* data = b3Recording_GetData( recording );
+	b3RecHeader header;
+	memcpy( &header, data, sizeof( header ) );
+	int begin = (int)sizeof( header );
+	int end = begin + (int)header.snapshotSize;
+	int found = -1;
+	for ( int offset = begin; offset + (int)sizeof( marker ) <= end; ++offset )
+	{
+		int value;
+		memcpy( &value, data + offset, sizeof( value ) );
+		if ( value == marker )
+		{
+			ENSURE( found == -1 );
+			found = offset;
+		}
+	}
+	ENSURE( found >= begin );
+	return found;
+}
+
+static int replacementLargeScratchAllocationCount;
+
+static void* ReplacementScratchBoundaryAlloc( int32_t size, int32_t alignment )
+{
+	if ( size > 64 * 1024 * 1024 )
+	{
+		replacementLargeScratchAllocationCount += 1;
+		size = alignment;
+	}
+#if defined( _WIN32 )
+	return _aligned_malloc( (size_t)size, (size_t)alignment );
+#else
+	return aligned_alloc( (size_t)alignment, (size_t)size );
+#endif
+}
+
+static void ReplacementScratchBoundaryFree( void* memory )
+{
+#if defined( _WIN32 )
+	_aligned_free( memory );
+#else
+	free( memory );
+#endif
+}
+
+// A recorded tree scratch capacity may be larger than the inactive scratch element types. Restore
+// it twice with bounded test allocations so the cleanup size arithmetic is exercised without
+// reserving gigabytes.
+static int CheckTreeScratchCleanupBoundary( const b3Recording* recording )
+{
+	int size = b3Recording_GetSize( recording );
+	const uint8_t* original = b3Recording_GetData( recording );
+	uint8_t* data = b3Alloc( size );
+	memcpy( data, original, size );
+
+	int offset = FindSnapshotMarker( recording, replacementTreeCapacityMarker );
+	int boundaryCapacity = INT_MAX / (int)sizeof( b3AABB ) + 1;
+	ENSURE( boundaryCapacity <= INT_MAX / (int)sizeof( b3Vec3 ) );
+	memcpy( data + offset, &boundaryCapacity, sizeof( boundaryCapacity ) );
+
+	int allocationBaseline = b3GetByteCount();
+	replacementLargeScratchAllocationCount = 0;
+	b3SetAllocator( ReplacementScratchBoundaryAlloc, ReplacementScratchBoundaryFree );
+	b3RecPlayer* player = b3CreatePlayer( data, size, 1 );
+	if ( player != NULL )
+	{
+		b3RecPlayer_Restart( player );
+		b3DestroyPlayer( player );
+	}
+	b3SetAllocator( NULL, NULL );
+
+	int largeAllocationCount = replacementLargeScratchAllocationCount;
+	b3Free( data, size );
+	ENSURE( player != NULL && largeAllocationCount >= 4 );
+	ENSURE( b3GetByteCount() == allocationBaseline - size );
+	return 0;
+}
+
+static int CheckMalformedReplacementCapacities( const b3Recording* recording )
+{
+	int size = b3Recording_GetSize( recording );
+	const uint8_t* original = b3Recording_GetData( recording );
+	uint8_t* data = b3Alloc( size );
+	int markers[] = { replacementMoveCapacityMarker, replacementTreeCapacityMarker, replacementArenaCapacityMarker,
+					  replacementOverflowCapacityMarker, replacementIslandCapacityMarker };
+	int offsets[ARRAY_COUNT( markers )];
+	for ( int i = 0; i < ARRAY_COUNT( markers ); ++i )
+	{
+		offsets[i] = FindSnapshotMarker( recording, markers[i] );
+	}
+	int allocationBaseline = b3GetByteCount();
+
+	for ( int i = 0; i < ARRAY_COUNT( markers ); ++i )
+	{
+		memcpy( data, original, size );
+		int invalid = -1;
+		memcpy( data + offsets[i], &invalid, sizeof( invalid ) );
+		ENSURE( b3CreatePlayer( data, size, 1 ) == NULL );
+		ENSURE( b3GetByteCount() == allocationBaseline );
+	}
+
+	int capacityCountMarkers[] = { replacementMoveCapacityMarker, replacementIslandCapacityMarker };
+	for ( int i = 0; i < ARRAY_COUNT( capacityCountMarkers ); ++i )
+	{
+		memcpy( data, original, size );
+		int offset = FindSnapshotMarker( recording, capacityCountMarkers[i] );
+		int invalidCount = capacityCountMarkers[i] + 1;
+		memcpy( data + offset + (int)sizeof( int ), &invalidCount, sizeof( invalidCount ) );
+		ENSURE( b3CreatePlayer( data, size, 1 ) == NULL );
+		ENSURE( b3GetByteCount() == allocationBaseline );
+	}
+
+	memcpy( data, original, size );
+	int invalidPeak = replacementArenaCapacityMarker + 1;
+	memcpy( data + offsets[2] + 2 * (int)sizeof( int ), &invalidPeak, sizeof( invalidPeak ) );
+	ENSURE( b3CreatePlayer( data, size, 1 ) == NULL );
+	ENSURE( b3GetByteCount() == allocationBaseline );
+
+	memcpy( data, original, size );
+	b3RecHeader truncated;
+	memcpy( &truncated, data, sizeof( truncated ) );
+	truncated.snapshotSize = (uint64_t)( offsets[3] - (int)sizeof( truncated ) + 2 );
+	memcpy( data, &truncated, sizeof( truncated ) );
+	ENSURE( b3CreatePlayer( data, size, 1 ) == NULL );
+	ENSURE( b3GetByteCount() == allocationBaseline );
+
+	b3Free( data, size );
+	return 0;
+}
+
+typedef struct ReplayMotion
+{
+	b3Pos position;
+	b3Quat rotation;
+	b3Vec3 linearVelocity, angularVelocity;
+} ReplayMotion;
+
+static ReplayMotion CaptureReplayMotion( b3BodyId body )
+{
+	return (ReplayMotion){ b3Body_GetPosition( body ), b3Body_GetRotation( body ), b3Body_GetLinearVelocity( body ),
+						   b3Body_GetAngularVelocity( body ) };
+}
+
+static int CompareReplayMotion( ReplayMotion a, ReplayMotion b )
+{
+	ENSURE( a.position.x == b.position.x && a.position.y == b.position.y && a.position.z == b.position.z );
+	ENSURE( a.rotation.v.x == b.rotation.v.x && a.rotation.v.y == b.rotation.v.y && a.rotation.v.z == b.rotation.v.z &&
+			a.rotation.s == b.rotation.s );
+	ENSURE( a.linearVelocity.x == b.linearVelocity.x && a.linearVelocity.y == b.linearVelocity.y &&
+			a.linearVelocity.z == b.linearVelocity.z );
+	ENSURE( a.angularVelocity.x == b.angularVelocity.x && a.angularVelocity.y == b.angularVelocity.y &&
+			a.angularVelocity.z == b.angularVelocity.z );
+	return 0;
+}
+
+// Recording begins while the retained pair is empty and an old end is pending. The next live and
+// replay steps must use the same warmed capacities, event identities and physical result.
+static int BlockGridReplacementCapacityReplay( void )
+{
+	int bytes = b3GetByteCount();
+	v3BlockGridData* stripedTerrain = CookReplayStripedSlab( 6, 6 );
+	v3BlockGridData* plainTerrain = CookReplaySlab( 6, 6 );
+	v3BlockGridData* shipGrid = CookReplaySlab( 3, 3 );
+	ENSURE( stripedTerrain != NULL && plainTerrain != NULL && shipGrid != NULL );
+
+	b3WorldDef worldDef = b3DefaultWorldDef();
+	worldDef.gravity = (b3Vec3){ 0.0f, -10.0f, 0.0f };
+	worldDef.enableSleep = false;
+	worldDef.workerCount = 1;
+	b3WorldId worldId = b3CreateWorld( &worldDef );
+	b3BodyDef bodyDef = b3DefaultBodyDef();
+	bodyDef.type = b3_staticBody;
+	b3ShapeDef shapeDef = b3DefaultShapeDef();
+	shapeDef.enableContactEvents = true;
+	b3ShapeId terrainShape = v3CreateBlockGridShape( b3CreateBody( worldId, &bodyDef ), &shapeDef, stripedTerrain );
+	bodyDef.type = b3_dynamicBody;
+	bodyDef.position = (b3Pos){ 1.5, 2.0, 1.5 };
+	shapeDef.density = 1.0f;
+	b3BodyId shipBody = b3CreateBody( worldId, &bodyDef );
+	b3ShapeId shipShape = v3CreateBlockGridShape( shipBody, &shapeDef, shipGrid );
+	for ( int i = 0; i < 180; ++i )
+	{
+		b3World_Step( worldId, 1.0f / 60.0f, 4 );
+	}
+
+	b3ContactId oldContact = RecordingTouchingContactId( shipShape, terrainShape );
+	ReplacementCapacityView warm = CaptureReplacementCapacities( worldId );
+	ENSURE( B3_IS_NON_NULL( oldContact ) && b3Contact_IsValid( oldContact ) && warm.manifoldCount > 1 );
+	ENSURE( v3ReplaceBlockGridShape( terrainShape, plainTerrain, true ) == v3_blockGridReplaceOk );
+	ENSURE( b3Contact_IsValid( oldContact ) == false );
+	ENSURE( PrepareReplacementCapacityMarkers( b3GetWorldFromId( worldId ) ) == 0 );
+	ReplacementCapacityView seed = CaptureReplacementCapacities( worldId );
+	ENSURE( seed.manifoldCount == 0 && seed.pairCapacityBytes == warm.pairCapacityBytes && seed.pairBytes == warm.pairBytes );
+
+	b3Recording* recording = b3CreateRecording( 1024 * 1024 );
+	b3World_StartRecording( worldId, recording );
+	ENSURE( b3Recording_GetSize( recording ) > 0 );
+	BeginReplacementReplayMeasurement();
+	b3World_Step( worldId, 1.0f / 60.0f, 4 );
+	EndReplacementReplayMeasurement();
+	printf( "  live replacement replay allocations/frees %d/%d\n", replacementReplayAllocationCount, replacementReplayFreeCount );
+	ENSURE( replacementReplayAllocationCount == 0 && replacementReplayFreeCount == 0 );
+	b3World_StopRecording( worldId );
+
+	ReplayEvents expectedEvents;
+	ENSURE( CaptureReplayEvents( worldId, &expectedEvents ) == 0 );
+	b3ContactEvents native = b3World_GetContactEvents( worldId );
+	b3ContactId newContact = RecordingTouchingContactId( shipShape, terrainShape );
+	ENSURE( native.beginCount == 1 && native.endCount == 1 );
+	ENSURE( B3_ID_EQUALS( native.endEvents[0].contactId, oldContact ) );
+	ENSURE( B3_ID_EQUALS( native.beginEvents[0].contactId, newContact ) );
+	ENSURE( newContact.index1 == oldContact.index1 && newContact.generation != oldContact.generation );
+	ENSURE( expectedEvents.beginCount > 0 && expectedEvents.endCount > 0 && expectedEvents.truncated == false );
+	for ( int i = 0; i < expectedEvents.endCount; ++i )
+	{
+		const v3BlockContactSide* side =
+			expectedEvents.end[i].sideA.isBlockGrid ? &expectedEvents.end[i].sideA : &expectedEvents.end[i].sideB;
+		ENSURE( side->userMaterialId == 101 || side->userMaterialId == 102 );
+	}
+	for ( int i = 0; i < expectedEvents.beginCount; ++i )
+	{
+		const v3BlockContactSide* side =
+			expectedEvents.begin[i].sideA.isBlockGrid ? &expectedEvents.begin[i].sideA : &expectedEvents.begin[i].sideB;
+		ENSURE( side->userMaterialId == 0 );
+	}
+	ReplacementCapacityView expectedCapacity = CaptureReplacementCapacities( worldId );
+	ReplayMotion expectedMotion = CaptureReplayMotion( shipBody );
+	ENSURE( expectedCapacity.manifoldCount > 0 && expectedCapacity.manifoldCount < warm.manifoldCount );
+	b3World* liveWorld = b3GetWorldFromId( worldId );
+	v3BlockGridPairState* capacityProbe =
+		v3BlockGridPairTryRestore( liveWorld, expectedCapacity.pairCapacityBytes, expectedCapacity.manifoldCount + 1 );
+	ENSURE( capacityProbe != NULL && v3BlockGridPairFreeState( liveWorld, capacityProbe ) );
+
+	b3RecPlayer* player = b3CreatePlayer( b3Recording_GetData( recording ), b3Recording_GetSize( recording ), 1 );
+	ENSURE( player != NULL );
+	ReplacementCapacityView replaySeed = CaptureReplacementCapacities( b3RecPlayer_GetWorldId( player ) );
+	ENSURE( CompareReplacementCapacities( &seed, &replaySeed ) == 0 );
+	for ( int repeat = 0; repeat < 3; ++repeat )
+	{
+		if ( repeat > 0 )
+		{
+			if ( repeat == 1 )
+			{
+				b3World* replayWorld = b3GetWorldFromId( b3RecPlayer_GetWorldId( player ) );
+				ENSURE( GrowReplacementReplayCapacities( replayWorld, &seed ) == 0 );
+			}
+			b3RecPlayer_SeekFrame( player, 0 );
+			ReplayEvents pending;
+			ENSURE( CaptureReplayEvents( b3RecPlayer_GetWorldId( player ), &pending ) == 0 );
+			ReplacementCapacityView restoredSeed = CaptureReplacementCapacities( b3RecPlayer_GetWorldId( player ) );
+			ENSURE( CompareReplacementCapacities( &seed, &restoredSeed ) == 0 );
+		}
+		BeginReplacementReplayMeasurement();
+		ENSURE( b3RecPlayer_StepFrame( player ) );
+		EndReplacementReplayMeasurement();
+		printf( "  replay replacement %d allocations/frees %d/%d\n", repeat, replacementReplayAllocationCount,
+				replacementReplayFreeCount );
+		ENSURE( replacementReplayAllocationCount == 0 && replacementReplayFreeCount == 0 );
+		ReplayEvents actualEvents;
+		ENSURE( CaptureReplayEvents( b3RecPlayer_GetWorldId( player ), &actualEvents ) == 0 );
+		ENSURE( CompareReplayEvents( &expectedEvents, &actualEvents ) == 0 );
+		ReplacementCapacityView actualCapacity = CaptureReplacementCapacities( b3RecPlayer_GetWorldId( player ) );
+		ENSURE( CompareReplacementCapacities( &expectedCapacity, &actualCapacity ) == 0 );
+		ENSURE( CompareReplayMotion( expectedMotion, CaptureReplayMotion( b3RecPlayer_GetBodyId( player, 1 ) ) ) == 0 );
+		ENSURE( b3RecPlayer_HasDiverged( player ) == false );
+	}
+
+	b3DestroyPlayer( player );
+	ENSURE( CheckTreeScratchCleanupBoundary( recording ) == 0 );
+	ENSURE( CheckMalformedReplacementCapacities( recording ) == 0 );
+	b3DestroyRecording( recording );
+	b3DestroyWorld( worldId );
+	v3DestroyBlockGridData( stripedTerrain );
+	v3DestroyBlockGridData( plainTerrain );
+	v3DestroyBlockGridData( shipGrid );
+	ENSURE( b3GetByteCount() == bytes );
+	return 0;
+}
+
+// The aggregate bounds overlap while the occupied cells do not, so the broad phase owns a real
+// potential pair that never touches. Replacement must clear its transient solver indices before a
+// recording captures the retained empty pair.
+static int BlockGridNonTouchingReplacementSeed( void )
+{
+	int bytes = b3GetByteCount();
+	v3BlockGridData* outer = CookReplaySeparatedGrid( 0, 10 );
+	v3BlockGridData* inner = CookReplaySeparatedGrid( 4, 6 );
+	ENSURE( outer != NULL && inner != NULL );
+
+	b3WorldDef worldDef = b3DefaultWorldDef();
+	worldDef.gravity = b3Vec3_zero;
+	worldDef.enableSleep = false;
+	worldDef.workerCount = 1;
+	b3WorldId worldId = b3CreateWorld( &worldDef );
+	b3BodyDef bodyDef = b3DefaultBodyDef();
+	bodyDef.type = b3_staticBody;
+	b3ShapeDef shapeDef = b3DefaultShapeDef();
+	b3ShapeId outerShape = v3CreateBlockGridShape( b3CreateBody( worldId, &bodyDef ), &shapeDef, outer );
+	bodyDef.type = b3_dynamicBody;
+	b3ShapeId innerShape = v3CreateBlockGridShape( b3CreateBody( worldId, &bodyDef ), &shapeDef, inner );
+	ENSURE( B3_IS_NON_NULL( outerShape ) && B3_IS_NON_NULL( innerShape ) );
+
+	b3World_Step( worldId, 1.0f / 60.0f, 4 );
+	ENSURE( b3Shape_GetContactCapacity( outerShape ) == 1 && b3Shape_GetContactCapacity( innerShape ) == 1 );
+	b3ContactData touching[1];
+	ENSURE( b3Shape_GetContactData( outerShape, touching, 1 ) == 0 );
+	ENSURE( v3ReplaceBlockGridShape( outerShape, outer, true ) == v3_blockGridReplaceOk );
+	ENSURE( b3Shape_GetContactCapacity( outerShape ) == 1 && b3Shape_GetContactData( outerShape, touching, 1 ) == 0 );
+
+	b3Recording* recording = b3CreateRecording( 0 );
+	b3World_StartRecording( worldId, recording );
+	ENSURE( b3Recording_GetSize( recording ) > 0 );
+	b3World_StopRecording( worldId );
+	b3RecPlayer* player = b3CreatePlayer( b3Recording_GetData( recording ), b3Recording_GetSize( recording ), 1 );
+	ENSURE( player != NULL );
+	b3ShapeId replayOuterShape;
+	ENSURE( b3Body_GetShapes( b3RecPlayer_GetBodyId( player, 0 ), &replayOuterShape, 1 ) == 1 );
+	ENSURE( b3Shape_GetContactCapacity( replayOuterShape ) == 1 );
+
+	b3DestroyPlayer( player );
+	b3DestroyRecording( recording );
+	b3DestroyWorld( worldId );
+	v3DestroyBlockGridData( outer );
+	v3DestroyBlockGridData( inner );
+	ENSURE( b3GetByteCount() == bytes );
+	return 0;
+}
+
+static v3BlockGridData* CookRecordingEventSlab( void )
+{
+	v3BlockGridBox box = { .bounds = { { 0, 0, 0 }, { 1, 1, 1 } } };
+	v3BlockGridBlock blocks[4];
+	for ( int i = 0; i < 4; ++i )
+	{
+		blocks[i] = (v3BlockGridBlock){ .x = i - 2, .userData = 991, .boxes = &box, .boxCount = 1 };
+	}
+	b3SurfaceMaterial material = b3DefaultSurfaceMaterial();
+	material.friction = 0;
+	material.userMaterialId = 73;
+	v3BlockGridCookDef cook = { .materials = &material, .materialCount = 1, .blocks = blocks, .blockCount = 4 };
+	return v3CookBlockGrid( &cook ).data;
+}
+
+static uint64_t HashReplayMotion( uint64_t hash, ReplayMotion motion )
+{
+	hash = b3FnvMixPosition( hash, motion.position );
+	float scalars[] = { motion.rotation.v.x,	  motion.rotation.v.y,	   motion.rotation.v.z,		motion.rotation.s,
+						motion.linearVelocity.x,  motion.linearVelocity.y, motion.linearVelocity.z, motion.angularVelocity.x,
+						motion.angularVelocity.y, motion.angularVelocity.z };
+	for ( int i = 0; i < ARRAY_COUNT( scalars ); ++i )
+	{
+		uint32_t bits;
+		memcpy( &bits, scalars + i, sizeof( bits ) );
+		hash = ( hash ^ bits ) * B3_SNAP_FNV_PRIME;
+	}
+	return hash;
+}
+
+// Both seed fixtures have one pending BlockGrid end and one ordinary end, with
+// no published events or active history. Change only a cached payload or the
+// pending replacement count, so the replay itself produces the mismatching output.
+static int CheckPendingDigestMismatch( b3Recording* rec, bool replacement )
+{
+	int size = b3Recording_GetSize( rec );
+	const uint8_t* original = b3Recording_GetData( rec );
+	uint8_t* data = b3Alloc( size );
+	memcpy( data, original, size );
+	b3RecHeader header;
+	memcpy( &header, data, sizeof( header ) );
+	int eventSize = 118 + 3 * (int)sizeof( ( (v3BlockContactEvent*)0 )->point.x );
+	int section = sizeof( header ) + (int)header.snapshotSize - ( 118 + eventSize + 32 );
+	int offset = replacement ? 2 : 102 + 41;
+	uint64_t value;
+	memcpy( &value, data + section + offset, sizeof( value ) );
+	ENSURE( value == ( replacement ? 1u : 991u ) );
+	value += 1;
+	memcpy( data + section + offset, &value, sizeof( value ) );
+	b3RecPlayer* control = b3CreatePlayer( original, size, 1 );
+	b3RecPlayer* changed = b3CreatePlayer( data, size, 1 );
+	ENSURE( control != NULL && changed != NULL );
+	ENSURE( b3RecPlayer_StepFrame( control ) && b3RecPlayer_StepFrame( changed ) );
+	b3WorldId a = b3RecPlayer_GetWorldId( control );
+	b3WorldId b = b3RecPlayer_GetWorldId( changed );
+	ENSURE( b3RecPlayer_GetBodyCount( control ) == b3RecPlayer_GetBodyCount( changed ) );
+	for ( int i = 0; i < b3RecPlayer_GetBodyCount( control ); ++i )
+	{
+		ENSURE( CompareReplayMotion( CaptureReplayMotion( b3RecPlayer_GetBodyId( control, i ) ),
+									 CaptureReplayMotion( b3RecPlayer_GetBodyId( changed, i ) ) ) == 0 );
+	}
+	ReplayEvents expected, actual;
+	ENSURE( CaptureReplayEvents( a, &expected ) == 0 && CaptureReplayEvents( b, &actual ) == 0 );
+	if ( replacement )
+	{
+		ENSURE( expected.counters.replacementPublishedCount == 1 && actual.counters.replacementPublishedCount == 2 );
+		actual.counters.replacementPublishedCount = expected.counters.replacementPublishedCount;
+	}
+	else
+	{
+		ENSURE( expected.endCount == 1 && actual.endCount == 1 );
+		v3BlockContactSide* side = actual.end[0].sideA.isBlockGrid ? &actual.end[0].sideA : &actual.end[0].sideB;
+		ENSURE( side->userData == 992 );
+		side->userData = 991;
+	}
+	// After accounting for the one deliberately changed observation, every other
+	// public event field and counter must agree exactly.
+	ENSURE( CompareReplayEvents( &expected, &actual ) == 0 );
+	ENSURE( !b3RecPlayer_HasDiverged( control ) );
+	ENSURE( b3RecPlayer_HasDiverged( changed ) && b3RecPlayer_GetDivergeFrame( changed ) == 1 );
+	ENSURE( b3RecPlayer_StepFrame( changed ) );
+	ENSURE( b3RecPlayer_HasDiverged( changed ) && b3RecPlayer_GetDivergeFrame( changed ) == 1 );
+	b3DestroyPlayer( control );
+	b3DestroyPlayer( changed );
+	b3Free( data, size );
+	return 0;
+}
+
+static int CheckRecordingEventSeed( bool settled, bool replace, bool destroy )
+{
+	b3WorldDef wd = b3DefaultWorldDef();
+	wd.gravity = (b3Vec3){ 0, -10, 0 };
+	wd.enableSleep = false;
+	wd.hitEventThreshold = 0.1f;
+	wd.workerCount = 1;
+	b3WorldId world = b3CreateWorld( &wd );
+	v3BlockGridData* grid = CookRecordingEventSlab();
+	ENSURE( grid != NULL );
+	b3BodyDef bd = b3DefaultBodyDef();
+	b3BodyId ground = b3CreateBody( world, &bd );
+	b3ShapeDef sd = b3DefaultShapeDef();
+	sd.enableContactEvents = sd.enableHitEvents = true;
+	sd.baseMaterial.friction = 0;
+	b3ShapeId terrain = v3CreateBlockGridShape( ground, &sd, grid );
+	bd.type = b3_dynamicBody;
+	bd.position = (b3Pos){ -0.25, 2, 0.5 };
+	b3BodyId body = b3CreateBody( world, &bd );
+	b3Sphere sphere = { b3Vec3_zero, 0.2f };
+	b3ShapeId shape = b3CreateSphereShape( body, &sd, &sphere );
+	int warmBegins = 0;
+	for ( int i = 0; i < ( settled ? 120 : 0 ); ++i )
+	{
+		b3World_Step( world, 1.0f / 60.0f, 4 );
+		warmBegins += v3World_GetBlockContactEvents( world ).beginCount;
+	}
+	ENSURE( !settled || ( warmBegins == 1 && b3Body_GetPosition( body ).y > 1.19 && b3Body_GetPosition( body ).y < 1.21 ) );
+	if ( replace )
+	{
+		v3BlockGridData* revision = CookRecordingEventSlab();
+		v3ReplaceBlockGridShape( terrain, revision, true );
+		v3DestroyBlockGridData( revision );
+	}
+	if ( destroy )
+	{
+		b3DestroyShape( terrain, true );
+		ENSURE( !b3Shape_IsValid( terrain ) );
+		b3Sphere distant = { { 100, 0, 0 }, 0.2f };
+		b3ShapeId reused = b3CreateSphereShape( ground, &sd, &distant );
+		ENSURE( reused.index1 == terrain.index1 && reused.generation != terrain.generation );
+	}
+	b3Recording* rec = b3CreateRecording( 0 );
+	b3World_StartRecording( world, rec );
+	ReplayEvents* trace = b3Alloc( 121 * sizeof( ReplayEvents ) );
+	int result = CaptureReplayEvents( world, trace );
+	int begins = 0, hits = 0, ends = 0;
+	for ( int i = 0; i < 120; ++i )
+	{
+		if ( i == 5 && !replace && !destroy && settled )
+			b3Body_SetLinearVelocity( body, (b3Vec3){ 0, 5, 0 } );
+		b3World_Step( world, 1.0f / 60.0f, 4 );
+		result |= CaptureReplayEvents( world, trace + i + 1 );
+		begins += trace[i + 1].beginCount;
+		hits += trace[i + 1].hitCount;
+		ends += trace[i + 1].endCount;
+	}
+	b3World_StopRecording( world );
+	if ( replace || destroy )
+		ENSURE( CheckPendingDigestMismatch( rec, replace ) == 0 );
+	ENSURE( begins >= ( destroy ? 0 : 1 ) && ends >= ( settled ? 1 : 0 ) && ( destroy || replace || hits == 1 ) );
+	if ( replace )
+		ENSURE( trace[1].counters.replacementPublishedCount == 1 && trace[2].counters.replacementPublishedCount == 0 );
+	if ( destroy || replace )
+	{
+		ENSURE( trace[1].endCount == 1 && trace[1].nativeEndCount == 1 );
+		const v3BlockContactEvent* e = trace[1].end;
+		const v3BlockContactSide* g = e->sideA.isBlockGrid ? &e->sideA : &e->sideB;
+		const v3BlockContactSide* s = e->sideA.isBlockGrid ? &e->sideB : &e->sideA;
+		ENSURE( g->shapeId.index1 == terrain.index1 && g->shapeId.generation == terrain.generation );
+		ENSURE( s->shapeId.index1 == shape.index1 && g->cellX == -1 && g->userData == 991 && g->userMaterialId == 73 );
+	}
+	for ( int repeat = 0; repeat < 2; ++repeat )
+	{
+		b3RecPlayer* player = b3CreatePlayer( b3Recording_GetData( rec ), b3Recording_GetSize( rec ), 1 );
+		ENSURE( player != NULL );
+		b3RecPlayer_SetKeyframePolicy( player, 16 * 1024 * 1024, 10 );
+		ReplayEvents actual;
+		for ( int i = 0; i <= 120; ++i )
+		{
+			if ( i > 0 )
+				ENSURE( b3RecPlayer_StepFrame( player ) );
+			result |= CaptureReplayEvents( b3RecPlayer_GetWorldId( player ), &actual );
+			if ( CompareReplayEvents( trace + i, &actual ) != 0 )
+			{
+				printf( "seed settled=%d replace=%d destroy=%d frame=%d\n", settled, replace, destroy, i );
+				result = 1;
+				break;
+			}
+		}
+		if ( result == 0 )
+		{
+			int seeks[] = { 20, 70, 10, 120, 0, 1 };
+			for ( int i = 0; i < ARRAY_COUNT( seeks ); ++i )
+			{
+				b3RecPlayer_SeekFrame( player, seeks[i] );
+				result |= CaptureReplayEvents( b3RecPlayer_GetWorldId( player ), &actual );
+				result |= CompareReplayEvents( trace + seeks[i], &actual );
+			}
+			b3RecPlayer_Restart( player );
+			result |= CaptureReplayEvents( b3RecPlayer_GetWorldId( player ), &actual );
+			result |= CompareReplayEvents( trace, &actual );
+			ENSURE( b3RecPlayer_StepFrame( player ) );
+			result |= CaptureReplayEvents( b3RecPlayer_GetWorldId( player ), &actual );
+			result |= CompareReplayEvents( trace + 1, &actual );
+		}
+		result |= b3RecPlayer_HasDiverged( player );
+		b3DestroyPlayer( player );
+	}
+	b3Free( trace, 121 * sizeof( ReplayEvents ) );
+	b3DestroyRecording( rec );
+	b3DestroyWorld( world );
+	v3DestroyBlockGridData( grid );
+	return result;
+}
+
+static int BlockGridEventSeeds( void )
+{
+	int result = CheckRecordingEventSeed( false, false, false );
+	result |= CheckRecordingEventSeed( true, false, false );
+	result |= CheckRecordingEventSeed( true, true, false );
+	result |= CheckRecordingEventSeed( true, false, true );
+	return result;
+}
+
+static int BlockGridOverflowReplay( void )
+{
+	int bytes = b3GetByteCount();
+	for ( int removeTracked = 0; removeTracked < 2; ++removeTracked )
+	{
+		b3WorldDef wd = b3DefaultWorldDef();
+		wd.gravity = (b3Vec3){ 0, -10, 0 };
+		wd.enableSleep = false;
+		b3WorldId world = b3CreateWorld( &wd );
+		v3BlockGridData* grid = CookRecordingEventSlab();
+		b3BodyDef bd = b3DefaultBodyDef();
+		b3ShapeDef sd = b3DefaultShapeDef();
+		sd.enableContactEvents = true;
+		b3ShapeId terrain = v3CreateBlockGridShape( b3CreateBody( world, &bd ), &sd, grid );
+		v3DestroyBlockGridData( grid );
+		ENSURE( v3World_GetBlockContactEvents( world ).capacity == 256 );
+		bd.type = b3_dynamicBody;
+		bd.position = (b3Pos){ -0.25, 1.19, 0.5 };
+		sd.filter.groupIndex = -1;
+		b3Sphere sphere = { b3Vec3_zero, 0.2f };
+		b3BodyId bodies[257];
+		for ( int i = 0; i < 257; ++i )
+		{
+			bodies[i] = b3CreateBody( world, &bd );
+			b3CreateSphereShape( bodies[i], &sd, &sphere );
+		}
+		b3World_Step( world, 1.0f / 60.0f, 4 );
+		v3BlockContactEvents events = v3World_GetBlockContactEvents( world );
+		ENSURE( events.beginCount == 256 && events.droppedBeginCount == 1 && events.truncated );
+		b3BodyId tracked =
+			events.beginEvents[0].sideA.isBlockGrid ? events.beginEvents[0].sideB.bodyId : events.beginEvents[0].sideA.bodyId;
+		b3BodyId omitted = b3_nullBodyId;
+		for ( int i = 0; i < 257; ++i )
+		{
+			bool found = false;
+			for ( int j = 0; j < events.beginCount; ++j )
+			{
+				found |= B3_ID_EQUALS( bodies[i], events.beginEvents[j].sideA.bodyId ) ||
+						 B3_ID_EQUALS( bodies[i], events.beginEvents[j].sideB.bodyId );
+			}
+			if ( !found )
+				omitted = bodies[i];
+		}
+		ENSURE( B3_IS_NON_NULL( omitted ) && B3_IS_NON_NULL( terrain ) );
+		// Seed with both the published overflow and an already pending cached end.
+		b3DestroyBody( removeTracked ? tracked : omitted );
+		b3Recording* rec = b3CreateRecording( 0 );
+		b3World_StartRecording( world, rec );
+		ReplayEvents trace[4];
+		ENSURE( CaptureReplayEvents( world, trace ) == 0 );
+		for ( int i = 1; i < 4; ++i )
+		{
+			if ( i == 3 && removeTracked )
+				b3DestroyBody( omitted );
+			b3World_Step( world, 1.0f / 60.0f, 4 );
+			ENSURE( CaptureReplayEvents( world, trace + i ) == 0 );
+		}
+		ENSURE( trace[1].truncated && !trace[2].truncated && trace[1].beginCount == 0 );
+		ENSURE( trace[1].endCount == removeTracked && trace[1].nativeEndCount == 1 );
+		ENSURE( trace[3].endCount == removeTracked && trace[3].beginCount == 0 );
+		b3World_StopRecording( world );
+		for ( int repeat = 0; repeat < 2; ++repeat )
+		{
+			b3RecPlayer* player = b3CreatePlayer( b3Recording_GetData( rec ), b3Recording_GetSize( rec ), 1 );
+			ENSURE( player != NULL );
+			for ( int restart = 0; restart < 2; ++restart )
+			{
+				b3RecPlayer_Restart( player );
+				for ( int i = 0; i < 4; ++i )
+				{
+					if ( i > 0 )
+						ENSURE( b3RecPlayer_StepFrame( player ) );
+					ReplayEvents actual;
+					ENSURE( CaptureReplayEvents( b3RecPlayer_GetWorldId( player ), &actual ) == 0 );
+					ENSURE( CompareReplayEvents( trace + i, &actual ) == 0 );
+				}
+				ENSURE( !b3RecPlayer_HasDiverged( player ) );
+			}
+			b3DestroyPlayer( player );
+		}
+		b3DestroyRecording( rec );
+		b3DestroyWorld( world );
+	}
+	ENSURE( b3GetByteCount() == bytes );
+	return 0;
+}
+
+// Read the captured frame before replay has a chance to rebuild its counters.
+static int CheckImmediateRecordingView( b3WorldId world, const ReplayEvents* expected )
+{
+	b3Recording* rec = b3CreateRecording( 0 );
+	b3World_StartRecording( world, rec );
+	b3World_StopRecording( world );
+	b3RecPlayer* player = b3CreatePlayer( b3Recording_GetData( rec ), b3Recording_GetSize( rec ), 1 );
+	ENSURE( player != NULL );
+	ReplayEvents actual;
+	b3WorldId replay = b3RecPlayer_GetWorldId( player );
+	ENSURE( CaptureReplayEvents( replay, &actual ) == 0 );
+	ENSURE( CompareReplayEvents( expected, &actual ) == 0 );
+	// Give the shell a different completed frame, then replace it with its seed.
+	b3World_Step( replay, 1.0f / 60.0f, 4 );
+	b3RecPlayer_Restart( player );
+	ENSURE( CaptureReplayEvents( replay, &actual ) == 0 );
+	ENSURE( CompareReplayEvents( expected, &actual ) == 0 );
+	b3DestroyPlayer( player );
+	b3DestroyRecording( rec );
+	return 0;
+}
+
+static int CheckCombinedRecording( bool replace, uint64_t* behaviorHash )
+{
+	b3WorldDef wd = b3DefaultWorldDef();
+	wd.workerCount = 1;
+	wd.enableSleep = false;
+	wd.gravity = (b3Vec3){ 0, -10, 0 };
+	wd.hitEventThreshold = 0.1f;
+	wd.maximumLinearSpeed = 40;
+	wd.maximumAngularSpeed = 3;
+	wd.projectileCandidateCap = 12;
+	b3WorldId world = b3CreateWorld( &wd );
+	b3Recording* rec = b3CreateRecording( 0 );
+	b3World_StartRecording( world, rec );
+	b3World_SetMaximumLinearSpeed( world, 30 );
+	b3World_SetMaximumAngularSpeed( world, 2 );
+	b3World_SetProjectileCandidateCap( world, 8 );
+	v3BlockGridData* terrain = CookReplaySlab( 6, 6 );
+	v3BlockGridData* hull = CookReplaySlab( 2, 2 );
+	v3BlockGridData* revision = CookReplaySlab( 1, 2 );
+	ENSURE( terrain && hull && revision );
+	b3BodyDef bd = b3DefaultBodyDef();
+	b3ShapeDef sd = b3DefaultShapeDef();
+	sd.enableContactEvents = sd.enableHitEvents = true;
+	sd.density = 1.0f;
+	b3BodyId ground = b3CreateBody( world, &bd );
+	v3CreateBlockGridShape( ground, &sd, terrain );
+	bd.type = b3_dynamicBody;
+	bd.position = (b3Pos){ 1.5, 3, 1.5 };
+	b3BodyId ship = b3CreateBody( world, &bd );
+	b3ShapeId shipShape = v3CreateBlockGridShape( ship, &sd, hull );
+	b3BodyId bullet = b3_nullBodyId;
+	b3ShapeId bulletShape = b3_nullShapeId;
+	ReplayEvents* trace = b3Alloc( 120 * sizeof( ReplayEvents ) );
+	ReplayMotion shipMotion[120], bulletMotion[60];
+	uint64_t liveHash = B3_SNAP_FNV_INIT;
+	uint64_t replacements = 0, sweeps = 0, candidates = 0, touching = 0, contacts = 0;
+	bool projectileHit = false, landed = false;
+	for ( int i = 0; i < 120; ++i )
+	{
+		if ( i == 60 )
+		{
+			printf( "  combined hull before shot p=(%.6f,%.6f,%.6f)\n", (double)b3Body_GetPosition( ship ).x,
+					(double)b3Body_GetPosition( ship ).y, (double)b3Body_GetPosition( ship ).z );
+			if ( replace )
+				ENSURE( v3ReplaceBlockGridShape( shipShape, revision, true ) == v3_blockGridReplaceOk );
+			ENSURE( b3Shape_IsValid( shipShape ) && B3_ID_EQUALS( b3Shape_GetBody( shipShape ), ship ) );
+			ENSURE( b3Body_GetMass( ship ) == ( replace ? 2.0f : 4.0f ) );
+			bd.position = (b3Pos){ -2, 1.5, 2.25 };
+			bd.linearVelocity = (b3Vec3){ 120, 0, 0 };
+			bd.gravityScale = 0;
+			bd.isBullet = true;
+			bullet = b3CreateBody( world, &bd );
+			b3Sphere sphere = { b3Vec3_zero, 0.2f };
+			bulletShape = b3CreateSphereShape( bullet, &sd, &sphere );
+		}
+		b3World_Step( world, 1.0f / 60.0f, 4 );
+		ENSURE( CaptureReplayEvents( world, trace + i ) == 0 );
+		shipMotion[i] = CaptureReplayMotion( ship );
+		liveHash = HashReplayMotion( liveHash, shipMotion[i] );
+		if ( i >= 60 )
+		{
+			bulletMotion[i - 60] = CaptureReplayMotion( bullet );
+			liveHash = HashReplayMotion( liveHash, bulletMotion[i - 60] );
+			ENSURE( b3Length( bulletMotion[i - 60].linearVelocity ) <= 30.0001f );
+		}
+		v3BlockGridPairCounters c = trace[i].counters;
+		replacements += c.replacementPublishedCount;
+		sweeps += c.projectileSweepCount;
+		candidates += c.candidateHitboxPairCount;
+		touching += c.touchingPairCount;
+		contacts += c.contactCount;
+		for ( int j = 0; j < trace[i].hitCount; ++j )
+		{
+			v3BlockContactEvent* e = trace[i].hit + j;
+			bool shipBullet = ( e->sideA.shapeId.index1 == shipShape.index1 && e->sideB.shapeId.index1 == bulletShape.index1 ) ||
+							  ( e->sideB.shapeId.index1 == shipShape.index1 && e->sideA.shapeId.index1 == bulletShape.index1 );
+			projectileHit |= shipBullet && e->normalImpulse > 0 && e->approachSpeed > 0.1f;
+			landed |= i < 60 && e->sideA.isBlockGrid && e->sideB.isBlockGrid;
+		}
+	}
+	printf( "  combined replace=%d landed=%d projectileHit=%d sweeps=%llu replacements=%llu pairs=%llu touching=%llu\n", replace,
+			landed, projectileHit, (unsigned long long)sweeps, (unsigned long long)replacements, (unsigned long long)candidates,
+			(unsigned long long)touching );
+	ENSURE( landed && projectileHit && sweeps > 0 && replacements == (uint64_t)replace && candidates > 0 && touching > 0 &&
+			contacts > 0 );
+	ENSURE( bulletMotion[0].linearVelocity.x == 30.0f );
+	b3World_StopRecording( world );
+	ENSURE( trace[119].counters.contactCount > 0 && trace[119].counters.candidateHitboxPairCount > 0 );
+	ENSURE( CheckImmediateRecordingView( world, trace + 119 ) == 0 );
+	for ( int repeat = 0; repeat < 2; ++repeat )
+	{
+		b3RecPlayer* player = b3CreatePlayer( b3Recording_GetData( rec ), b3Recording_GetSize( rec ), 1 );
+		ENSURE( player != NULL );
+		b3RecPlayer_SetKeyframePolicy( player, 16 * 1024 * 1024, 10 );
+		b3WorldId replayWorld = b3RecPlayer_GetWorldId( player );
+		ENSURE( b3World_GetMaximumLinearSpeed( replayWorld ) == 40 && b3World_GetMaximumAngularSpeed( replayWorld ) == 3 &&
+				b3World_GetProjectileCandidateCap( replayWorld ) == 12 );
+		uint64_t replayHash = B3_SNAP_FNV_INIT;
+		for ( int i = 0; i < 120; ++i )
+		{
+			ENSURE( b3RecPlayer_StepFrame( player ) );
+			ENSURE( b3World_GetMaximumLinearSpeed( replayWorld ) == 30 && b3World_GetMaximumAngularSpeed( replayWorld ) == 2 &&
+					b3World_GetProjectileCandidateCap( replayWorld ) == 8 );
+			ReplayEvents actual;
+			ENSURE( CaptureReplayEvents( replayWorld, &actual ) == 0 );
+			if ( CompareReplayEvents( trace + i, &actual ) )
+			{
+				printf( "combined mismatch frame=%d repeat=%d\n", i + 1, repeat );
+				return 1;
+			}
+			b3BodyId replayShip = b3RecPlayer_GetBodyId( player, 1 );
+			ENSURE( replayShip.index1 == ship.index1 && replayShip.generation == ship.generation );
+			ReplayMotion motion = CaptureReplayMotion( replayShip );
+			ENSURE( CompareReplayMotion( shipMotion[i], motion ) == 0 );
+			replayHash = HashReplayMotion( replayHash, motion );
+			if ( i >= 60 )
+			{
+				motion = CaptureReplayMotion( b3RecPlayer_GetBodyId( player, 2 ) );
+				ENSURE( CompareReplayMotion( bulletMotion[i - 60], motion ) == 0 );
+				replayHash = HashReplayMotion( replayHash, motion );
+			}
+		}
+		ENSURE( replayHash == liveHash && !b3RecPlayer_HasDiverged( player ) );
+		ENSURE( b3RecPlayer_GetKeyframeBytes( player ) > 0 );
+		int seeks[] = { 21, 61, 91, 41, 119 };
+		for ( int j = 0; j < ARRAY_COUNT( seeks ); ++j )
+		{
+			int frame = seeks[j];
+			b3RecPlayer_SeekFrame( player, frame );
+			ReplayEvents actual;
+			ENSURE( CaptureReplayEvents( replayWorld, &actual ) == 0 );
+			ENSURE( CompareReplayEvents( trace + frame - 1, &actual ) == 0 );
+			ENSURE( CompareReplayMotion( shipMotion[frame - 1], CaptureReplayMotion( b3RecPlayer_GetBodyId( player, 1 ) ) ) ==
+					0 );
+			ENSURE( !b3RecPlayer_HasDiverged( player ) );
+		}
+		b3DestroyPlayer( player );
+	}
+	*behaviorHash = liveHash;
+	b3Free( trace, 120 * sizeof( ReplayEvents ) );
+	b3DestroyRecording( rec );
+	b3DestroyWorld( world );
+	v3DestroyBlockGridData( terrain );
+	v3DestroyBlockGridData( hull );
+	v3DestroyBlockGridData( revision );
+	return 0;
+}
+
+static int BlockGridCombinedReplay( void )
+{
+	int bytes = b3GetByteCount();
+	uint64_t control, replaced;
+	ENSURE( CheckCombinedRecording( false, &control ) == 0 );
+	ENSURE( CheckCombinedRecording( true, &replaced ) == 0 );
+	ENSURE( control != replaced );
+	printf( "  combined behavior hash control=%016llx replaced=%016llx\n", (unsigned long long)control,
+			(unsigned long long)replaced );
+	ENSURE( b3GetByteCount() == bytes );
+	return 0;
+}
+
+// Corrupt only a digest in frame 2. Simulation bytes stay identical, and both
+// stepping interfaces must consume all frame digests before returning frame 2.
+static int RecordingDigestDivergence( void )
+{
+	b3WorldDef wd = b3DefaultWorldDef();
+	b3WorldId world = b3CreateWorld( &wd );
+	b3Recording* rec = b3CreateRecording( 0 );
+	b3World_StartRecording( world, rec );
+	b3BodyDef bd = b3DefaultBodyDef();
+	bd.type = b3_dynamicBody;
+	b3BodyId body = b3CreateBody( world, &bd );
+	b3Sphere sphere = { b3Vec3_zero, 0.2f };
+	b3ShapeDef sd = b3DefaultShapeDef();
+	b3CreateSphereShape( body, &sd, &sphere );
+	ReplayMotion motion[3];
+	for ( int i = 0; i < 3; ++i )
+	{
+		b3World_Step( world, 1.0f / 60.0f, 4 );
+		motion[i] = CaptureReplayMotion( body );
+	}
+	b3World_StopRecording( world );
+	b3DestroyWorld( world );
+	int size = b3Recording_GetSize( rec );
+	uint8_t* data = b3Alloc( size );
+	int opcodes[] = { b3_recOpContactEventHash, b3_recOpBlockGridCountersHash };
+	ENSURE( b3_recOpBlockGridCountersHash == 0xF4 );
+	for ( int kind = 0; kind < 2; ++kind )
+	{
+		memcpy( data, b3Recording_GetData( rec ), size );
+		b3RecHeader header;
+		memcpy( &header, data, sizeof( header ) );
+		int cursor = sizeof( header ) + (int)header.snapshotSize;
+		int frame = 0, digests = 0;
+		while ( cursor + 4 <= (int)header.registryOffset )
+		{
+			int opcode = data[cursor];
+			int length = data[cursor + 1] | ( data[cursor + 2] << 8 ) | ( data[cursor + 3] << 16 );
+			ENSURE( cursor + 4 + length <= (int)header.registryOffset );
+			if ( opcode == b3_recOpStep )
+				++frame;
+			if ( opcode == opcodes[kind] )
+			{
+				++digests;
+				if ( frame == 2 )
+					data[cursor + 4 + length - 1] ^= 1;
+			}
+			cursor += 4 + length;
+		}
+		ENSURE( digests == 3 );
+		for ( int staged = 0; staged < 2; ++staged )
+		{
+			b3RecPlayer* player = b3CreatePlayer( data, size, 1 );
+			ENSURE( player != NULL );
+			for ( int i = 1; i <= 3; ++i )
+			{
+				if ( staged )
+				{
+					for ( int call = 0; call < 3 && b3RecPlayer_GetFrame( player ) < i; ++call )
+						b3RecPlayer_SubStepFrame( player );
+				}
+				else
+					ENSURE( b3RecPlayer_StepFrame( player ) );
+				ENSURE( b3RecPlayer_GetFrame( player ) == i );
+				ENSURE( b3RecPlayer_HasDiverged( player ) == ( i >= 2 ) );
+				ENSURE( b3RecPlayer_GetDivergeFrame( player ) == ( i >= 2 ? 2 : -1 ) );
+				ENSURE( CompareReplayMotion( motion[i - 1], CaptureReplayMotion( b3RecPlayer_GetBodyId( player, 0 ) ) ) == 0 );
+			}
+			b3DestroyPlayer( player );
+		}
+	}
+	b3Free( data, size );
+	b3DestroyRecording( rec );
+	return 0;
+}
+
+// Format tests target the appended section, leaving the established object and
+// geometry encodings intact. This fixture has one active contact at first impact.
+static int RecordingEventSectionValidation( void )
+{
+	int bytes = b3GetByteCount();
+	b3WorldDef wd = b3DefaultWorldDef();
+	wd.gravity = (b3Vec3){ 0, -10, 0 };
+	wd.enableSleep = false;
+	wd.hitEventThreshold = 0.1f;
+	b3WorldId world = b3CreateWorld( &wd );
+	v3BlockGridData* grid = CookRecordingEventSlab();
+	b3BodyDef bd = b3DefaultBodyDef();
+	b3ShapeDef sd = b3DefaultShapeDef();
+	sd.enableContactEvents = sd.enableHitEvents = true;
+	v3CreateBlockGridShape( b3CreateBody( world, &bd ), &sd, grid );
+	v3DestroyBlockGridData( grid );
+	bd.type = b3_dynamicBody;
+	bd.position = (b3Pos){ -0.25, 2, 0.5 };
+	b3Sphere sphere = { b3Vec3_zero, 0.2f };
+	b3CreateSphereShape( b3CreateBody( world, &bd ), &sd, &sphere );
+	ReplayEvents expected;
+	for ( int i = 0; i < 120; ++i )
+	{
+		b3World_Step( world, 1.0f / 60.0f, 4 );
+		if ( v3World_GetBlockContactEvents( world ).hitCount != 0 )
+			break;
+	}
+	ENSURE( CaptureReplayEvents( world, &expected ) == 0 );
+	ENSURE( expected.beginCount == 1 && expected.hitCount == 1 && expected.endCount == 0 && expected.nativeEndCount == 0 );
+	b3Recording* rec = b3CreateRecording( 0 );
+	b3World_StartRecording( world, rec );
+	b3World_Step( world, 1.0f / 60.0f, 4 );
+	b3World_StopRecording( world );
+	b3DestroyWorld( world );
+	int size = b3Recording_GetSize( rec );
+	const uint8_t* original = b3Recording_GetData( rec );
+	uint8_t* data = b3Alloc( size );
+	b3RecHeader header;
+	memcpy( &header, original, sizeof( header ) );
+	int eventSize = 118 + 3 * (int)sizeof( expected.begin[0].point.x );
+	int sectionSize = 118 + 20 + 3 * eventSize;
+	int section = (int)sizeof( header ) + (int)header.snapshotSize - sectionSize;
+	ENSURE( section > (int)sizeof( header ) );
+	int allocationBaseline = b3GetByteCount();
+	for ( int repeat = 0; repeat < 3; ++repeat )
+	{
+		b3RecPlayer* player = b3CreatePlayer( original, size, 1 );
+		ENSURE( player != NULL );
+		ReplayEvents actual;
+		ENSURE( CaptureReplayEvents( b3RecPlayer_GetWorldId( player ), &actual ) == 0 );
+		ENSURE( CompareReplayEvents( &expected, &actual ) == 0 );
+		ENSURE( b3RecPlayer_StepFrame( player ) );
+		b3RecPlayer_Restart( player );
+		ENSURE( CaptureReplayEvents( b3RecPlayer_GetWorldId( player ), &actual ) == 0 );
+		ENSURE( CompareReplayEvents( &expected, &actual ) == 0 );
+		b3DestroyPlayer( player );
+		ENSURE( b3GetByteCount() == allocationBaseline );
+	}
+	int cuts[] = { 1, 4, 8, 32, eventSize, sectionSize - 1 };
+	for ( int i = 0; i < ARRAY_COUNT( cuts ); ++i )
+	{
+		memcpy( data, original, size );
+		b3RecHeader truncated = header;
+		truncated.snapshotSize -= cuts[i];
+		memcpy( data, &truncated, sizeof( truncated ) );
+		ENSURE( b3CreatePlayer( data, size, 1 ) == NULL );
+		ENSURE( b3GetByteCount() == allocationBaseline );
+	}
+	// Invalid flags, an oversized history, invalid side encoding/ID, a NaN point,
+	// a negative contact slot, an oversized event array, and an unbounded native end count.
+	int offsets[] = { 0, 1, 74, 78 + 12, 78, 78 + 98, 78 + eventSize, 78 + eventSize + 8 + 4, sectionSize - 8 };
+	uint32_t values[] = { 2, 2, 257, 2, 0, 0x7fc00000, UINT32_MAX, 257, INT32_MAX };
+	for ( int i = 0; i < ARRAY_COUNT( offsets ); ++i )
+	{
+		memcpy( data, original, size );
+		int width = ( i == 0 || i == 1 || i == 3 ) ? 1 : 4;
+		if ( i == 5 )
+		{
+			// Write a NaN in the actual position precision.
+			if ( sizeof( expected.begin[0].point.x ) == 8 )
+			{
+				uint64_t nan = UINT64_C( 0x7ff8000000000000 );
+				memcpy( data + section + offsets[i], &nan, 8 );
+			}
+			else
+				memcpy( data + section + offsets[i], values + i, 4 );
+		}
+		else
+			memcpy( data + section + offsets[i], values + i, width );
+		ENSURE( b3CreatePlayer( data, size, 1 ) == NULL );
+		ENSURE( b3GetByteCount() == allocationBaseline );
+	}
+	b3Free( data, size );
+	b3DestroyRecording( rec );
+	ENSURE( b3GetByteCount() == bytes );
+	return 0;
+}
+
+static int recordingEventAllocations;
+static int recordingFailEventAllocation;
+
+static void* RecordingEventAlloc( int size, int alignment )
+{
+	unsigned int eventBytes = (unsigned int)( 256 * sizeof( v3BlockContactEvent ) );
+	unsigned int recordBytes = (unsigned int)( 256 * sizeof( v3BlockContactRecord ) );
+	if ( size == eventBytes || size == recordBytes )
+	{
+		if ( ++recordingEventAllocations == recordingFailEventAllocation )
+			return NULL;
+	}
+#if defined( _WIN32 )
+	return _aligned_malloc( size, alignment );
+#else
+	return aligned_alloc( alignment, size );
+#endif
+}
+
+static void RecordingEventFree( void* memory )
+{
+#if defined( _WIN32 )
+	_aligned_free( memory );
+#else
+	free( memory );
+#endif
+}
+
+static int RecordingPendingAllocationFailure( void )
+{
+	int bytes = b3GetByteCount();
+	b3WorldDef wd = b3DefaultWorldDef();
+	wd.gravity = b3Vec3_zero;
+	b3WorldId world = b3CreateWorld( &wd );
+	v3BlockGridData* grid = CookRecordingEventSlab();
+	b3BodyDef bd = b3DefaultBodyDef();
+	b3ShapeDef sd = b3DefaultShapeDef();
+	sd.enableContactEvents = true;
+	b3BodyId ground = b3CreateBody( world, &bd );
+	v3CreateBlockGridShape( ground, &sd, grid );
+	v3DestroyBlockGridData( grid );
+	bd.type = b3_dynamicBody;
+	bd.position = (b3Pos){ -0.25, 1.19, 0.5 };
+	b3Sphere sphere = { b3Vec3_zero, 0.2f };
+	b3CreateSphereShape( b3CreateBody( world, &bd ), &sd, &sphere );
+	b3World_Step( world, 1.0f / 60.0f, 4 );
+	ENSURE( v3World_GetBlockContactEvents( world ).beginCount == 1 );
+	b3DestroyBody( ground );
+	bd = b3DefaultBodyDef();
+	b3BodyId reused = b3CreateBody( world, &bd );
+	ENSURE( reused.index1 == ground.index1 && reused.generation != ground.generation );
+	b3Recording* rec = b3CreateRecording( 0 );
+	b3World_StartRecording( world, rec );
+	b3World_Step( world, 1.0f / 60.0f, 4 );
+	ENSURE( v3World_GetBlockContactEvents( world ).endCount == 1 );
+	b3World_StopRecording( world );
+	b3DestroyWorld( world );
+	int allocationBaseline = b3GetByteCount();
+	// Every partial reservation must release the preceding successful allocations.
+	for ( int failure = 1; failure <= 6; ++failure )
+	{
+		recordingEventAllocations = 0;
+		recordingFailEventAllocation = failure;
+		b3SetAllocator( RecordingEventAlloc, RecordingEventFree );
+		b3RecPlayer* player = b3CreatePlayer( b3Recording_GetData( rec ), b3Recording_GetSize( rec ), 1 );
+		b3SetAllocator( NULL, NULL );
+		ENSURE( player == NULL && recordingEventAllocations == failure );
+		ENSURE( b3GetByteCount() == allocationBaseline );
+	}
+	b3RecPlayer* player = b3CreatePlayer( b3Recording_GetData( rec ), b3Recording_GetSize( rec ), 1 );
+	ENSURE( player != NULL && b3RecPlayer_StepFrame( player ) );
+	v3BlockContactEvents ends = v3World_GetBlockContactEvents( b3RecPlayer_GetWorldId( player ) );
+	ENSURE( ends.endCount == 1 );
+	const v3BlockContactSide* old = ends.endEvents[0].sideA.isBlockGrid ? &ends.endEvents[0].sideA : &ends.endEvents[0].sideB;
+	ENSURE( old->bodyId.index1 == ground.index1 && old->bodyId.generation == ground.generation );
+	ENSURE( old->bodyId.world0 == b3RecPlayer_GetWorldId( player ).index1 - 1 );
+	b3DestroyPlayer( player );
+	ENSURE( b3GetByteCount() == allocationBaseline );
+	b3DestroyRecording( rec );
+	ENSURE( b3GetByteCount() == bytes );
+	return 0;
+}
+
+// AllOps covers the mutator encodings. This short sequence supplies independent
+// motion evidence for a two-step target and a wrench applied before each fixed step.
+static int RecordingAlphaMotion( void )
+{
+	b3WorldDef wd = b3DefaultWorldDef();
+	wd.gravity = b3Vec3_zero;
+	wd.enableSleep = false;
+	wd.maximumLinearSpeed = 30;
+	wd.maximumAngularSpeed = 2;
+	b3WorldId world = b3CreateWorld( &wd );
+	b3Recording* rec = b3CreateRecording( 0 );
+	b3World_StartRecording( world, rec );
+	b3BodyDef bd = b3DefaultBodyDef();
+	b3BodyId ground = b3CreateBody( world, &bd );
+	bd.type = b3_dynamicBody;
+	b3BodyId hinge = b3CreateBody( world, &bd );
+	b3ShapeDef sd = b3DefaultShapeDef();
+	sd.density = 1;
+	b3Sphere sphere = { b3Vec3_zero, 0.2f };
+	b3CreateSphereShape( hinge, &sd, &sphere );
+	b3RevoluteJointDef jd = b3DefaultRevoluteJointDef();
+	jd.base.bodyIdA = ground;
+	jd.base.bodyIdB = hinge;
+	jd.enableMotor = true;
+	jd.motorSpeed = 1;
+	jd.maxMotorTorque = 10;
+	b3JointId joint = b3CreateRevoluteJoint( world, &jd );
+	bd.position = (b3Pos){ 5, 0, 0 };
+	b3BodyId freeBody = b3CreateBody( world, &bd );
+	b3CreateSphereShape( freeBody, &sd, &sphere );
+	b3MassData mass = { .mass = 2, .inertia = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } } };
+	b3Body_SetMassData( freeBody, mass );
+	// Unit inertia keeps the motor accelerating across the first fixed step.
+	b3Body_SetMassData( hinge, mass );
+	bd.type = b3_kinematicBody;
+	bd.position = (b3Pos){ 10, 0, 0 };
+	b3BodyId targetBody = b3CreateBody( world, &bd );
+	b3CreateSphereShape( targetBody, &sd, &sphere );
+	ReplayMotion trace[6][3];
+	float angles[6], torques[6];
+	float dt = 1.0f / 60.0f;
+	for ( int batch = 0; batch < 3; ++batch )
+	{
+		b3WorldTransform target = { .p = { 10.0 + 0.1 * ( batch + 1 ), 0, 0 }, .q = b3Quat_identity };
+		b3Body_SetTargetTransform( targetBody, target, 2 * dt, true );
+		if ( batch == 2 )
+		{
+			b3Body_SetLinearVelocity( freeBody, (b3Vec3){ 1000, 0, 0 } );
+			b3Body_SetAngularVelocity( freeBody, (b3Vec3){ 0, 0, 100 } );
+		}
+		for ( int fixed = 0; fixed < 2; ++fixed )
+		{
+			b3Body_ApplyForceToCenter( freeBody, (b3Vec3){ 6, 0, 0 }, true );
+			b3Body_ApplyTorque( freeBody, (b3Vec3){ 0, 0, 3 }, true );
+			b3World_Step( world, dt, 4 );
+			int frame = 2 * batch + fixed;
+			trace[frame][0] = CaptureReplayMotion( hinge );
+			trace[frame][1] = CaptureReplayMotion( freeBody );
+			trace[frame][2] = CaptureReplayMotion( targetBody );
+			angles[frame] = b3RevoluteJoint_GetAngle( joint );
+			torques[frame] = b3RevoluteJoint_GetMotorTorque( joint );
+			if ( batch < 2 )
+			{
+				ENSURE_SMALL( trace[frame][1].linearVelocity.x - 3 * dt * ( frame + 1 ), 1.0e-6f );
+				ENSURE_SMALL( trace[frame][1].angularVelocity.z - 3 * dt * ( frame + 1 ), 1.0e-6f );
+			}
+			else
+			{
+				ENSURE_SMALL( trace[frame][1].linearVelocity.x - 30, 1.0e-5f );
+				ENSURE_SMALL( trace[frame][1].angularVelocity.z - 2, 1.0e-5f );
+			}
+		}
+		ENSURE_SMALL( b3Body_GetPosition( targetBody ).x - target.p.x, 1.0e-6 );
+	}
+	printf( "  alpha hinge angles %.9g %.9g motor torque %.9g angular velocity %.9g\n", angles[0], angles[5], torques[0],
+			trace[0][0].angularVelocity.z );
+	ENSURE( angles[0] > 0 && angles[5] > angles[0] && torques[0] > 0 );
+	b3World_StopRecording( world );
+	b3DestroyWorld( world );
+	b3RecPlayer* player = b3CreatePlayer( b3Recording_GetData( rec ), b3Recording_GetSize( rec ), 1 );
+	ENSURE( player != NULL );
+	for ( int frame = 0; frame < 6; ++frame )
+	{
+		ENSURE( b3RecPlayer_StepFrame( player ) );
+		for ( int body = 0; body < 3; ++body )
+		{
+			ENSURE( CompareReplayMotion( trace[frame][body], CaptureReplayMotion( b3RecPlayer_GetBodyId( player, body + 1 ) ) ) ==
+					0 );
+		}
+		b3JointId replayJoint;
+		ENSURE( b3Body_GetJoints( b3RecPlayer_GetBodyId( player, 1 ), &replayJoint, 1 ) == 1 );
+		ENSURE( b3RevoluteJoint_GetAngle( replayJoint ) == angles[frame] );
+		ENSURE( b3RevoluteJoint_GetMotorTorque( replayJoint ) == torques[frame] );
+		ENSURE( !b3RecPlayer_HasDiverged( player ) );
+	}
+	b3DestroyPlayer( player );
+	b3DestroyRecording( rec );
+	return 0;
+}
+
+static int RecordingProjectileCap( void )
+{
+	// The existing sweep acceptance fixture's varying far faces keep the 16x16
+	// wall fragmented. A four-metre capsule has several equally early candidates.
+	v3BlockGridBlock blocks[256];
+	v3BlockGridBox boxes[256];
+	for ( int y = 0; y < 16; ++y )
+	{
+		for ( int z = 0; z < 16; ++z )
+		{
+			int i = 16 * y + z;
+			boxes[i] = (v3BlockGridBox){ .bounds = { { 0, 0, 0 }, { 0.5f + 0.02f * ( ( y * 7 + z * 3 ) % 21 ), 1, 1 } } };
+			blocks[i] = (v3BlockGridBlock){ .y = y, .z = z, .userData = i + 1, .boxes = boxes + i, .boxCount = 1 };
+		}
+	}
+	b3SurfaceMaterial material = b3DefaultSurfaceMaterial();
+	v3BlockGridCookDef cook = { .materials = &material, .materialCount = 1, .blocks = blocks, .blockCount = 256 };
+	v3BlockGridData* grid = v3CookBlockGrid( &cook ).data;
+	ENSURE( grid != NULL && v3BlockGrid_GetCookStats( grid ).boxCount > 1 );
+	double unlimitedX = 0;
+	for ( int cap = 0; cap <= 1; ++cap )
+	{
+		b3WorldDef wd = b3DefaultWorldDef();
+		wd.gravity = b3Vec3_zero;
+		wd.enableSleep = false;
+		wd.workerCount = 1;
+		b3WorldId world = b3CreateWorld( &wd );
+		b3BodyDef bd = b3DefaultBodyDef();
+		b3ShapeDef sd = b3DefaultShapeDef();
+		sd.enableContactEvents = sd.enableHitEvents = true;
+		v3CreateBlockGridShape( b3CreateBody( world, &bd ), &sd, grid );
+		bd.type = b3_dynamicBody;
+		bd.position = (b3Pos){ -1, 6.5, 9.5 };
+		bd.linearVelocity = (b3Vec3){ 120, 0, 0 };
+		bd.isBullet = true;
+		b3BodyId bullet = b3CreateBody( world, &bd );
+		b3Capsule capsule = { { 0, 0, -2 }, { 0, 0, 2 }, 0.1f };
+		b3CreateCapsuleShape( bullet, &sd, &capsule );
+		b3Recording* rec = b3CreateRecording( 0 );
+		b3World_StartRecording( world, rec );
+		b3World_SetProjectileCandidateCap( world, cap );
+		b3World_Step( world, 1.0f / 60.0f, 4 );
+		ReplayMotion motion = CaptureReplayMotion( bullet );
+		ReplayEvents expected;
+		ENSURE( CaptureReplayEvents( world, &expected ) == 0 );
+		ENSURE( expected.counters.projectileSweepCount > 0 );
+		if ( cap == 0 )
+		{
+			ENSURE( expected.counters.capExhaustionCount == 0 && motion.position.x > -1 && motion.position.x < 0 );
+			unlimitedX = motion.position.x;
+		}
+		else
+		{
+			ENSURE( expected.counters.capExhaustionCount > 0 && motion.position.x == -1 && motion.linearVelocity.x == 120 );
+			ENSURE( motion.position.x < unlimitedX );
+		}
+		b3World_StopRecording( world );
+		ENSURE( CheckImmediateRecordingView( world, &expected ) == 0 );
+		for ( int repeat = 0; repeat < 2; ++repeat )
+		{
+			b3RecPlayer* player = b3CreatePlayer( b3Recording_GetData( rec ), b3Recording_GetSize( rec ), 1 );
+			ENSURE( player != NULL && b3RecPlayer_StepFrame( player ) );
+			ReplayEvents actual;
+			ENSURE( CaptureReplayEvents( b3RecPlayer_GetWorldId( player ), &actual ) == 0 );
+			ENSURE( CompareReplayEvents( &expected, &actual ) == 0 );
+			ENSURE( CompareReplayMotion( motion, CaptureReplayMotion( b3RecPlayer_GetBodyId( player, 1 ) ) ) == 0 );
+			ENSURE( !b3RecPlayer_HasDiverged( player ) );
+			b3DestroyPlayer( player );
+		}
+		b3DestroyRecording( rec );
+		b3DestroyWorld( world );
+	}
+	v3DestroyBlockGridData( grid );
+	return 0;
+}
+
 int RecordingTest( void )
 {
+	RUN_SUBTEST( BlockGridReplacementCapacityReplay );
+	RUN_SUBTEST( BlockGridNonTouchingReplacementSeed );
+	RUN_SUBTEST( BlockGridEventSeeds );
+	RUN_SUBTEST( BlockGridOverflowReplay );
+	RUN_SUBTEST( BlockGridCombinedReplay );
+	RUN_SUBTEST( RecordingDigestDivergence );
+	RUN_SUBTEST( RecordingEventSectionValidation );
+	RUN_SUBTEST( RecordingPendingAllocationFailure );
+	RUN_SUBTEST( RecordingAlphaMotion );
+	RUN_SUBTEST( RecordingProjectileCap );
 	RUN_SUBTEST( GeometryHashCollision );
 	RUN_SUBTEST( ShapeNameReplay );
 	RUN_SUBTEST( SphereRoundTrip );
+	RUN_SUBTEST( SafetyFactorRoundTrip );
 	RUN_SUBTEST( EmptyWorldRoundTrip );
 	RUN_SUBTEST( HullDedup );
 	RUN_SUBTEST( MidStreamNoContacts );
@@ -2082,6 +4006,7 @@ int RecordingTest( void )
 	RUN_SUBTEST( TaggedQuery );
 	RUN_SUBTEST( TransformedHullRoundTrip );
 	RUN_SUBTEST( GeometryMutatorReplay );
+	RUN_SUBTEST( BlockGridReplaceReplay );
 	RUN_SUBTEST( AllOps );
 	RUN_SUBTEST( ReservedHeaderBytes );
 	return 0;

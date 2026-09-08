@@ -71,6 +71,11 @@ B3_API b3ContactEvents b3World_GetContactEvents( b3WorldId worldId );
 /// Get the joint events for the current time step. The event data is transient. Do not store a reference to this data.
 B3_API b3JointEvents b3World_GetJointEvents( b3WorldId worldId );
 
+/// The world queries below share one BlockGrid query buffer that the world owns and sizes
+/// when a BlockGrid shape is attached or replaced. A query therefore allocates nothing, and,
+/// like every other world operation, one runs at a time: they are not safe to call
+/// concurrently with each other or with b3World_Step.
+
 /// Overlap test for all shapes that *potentially* overlap the provided AABB
 B3_API b3TreeStats b3World_OverlapAABB( b3WorldId worldId, b3AABB aabb, b3QueryFilter filter, b3OverlapResultFcn* fcn,
 										void* context );
@@ -193,11 +198,30 @@ B3_API void b3World_SetContactRecycleDistance( b3WorldId worldId, float recycleD
 /// Get the contact point recycling distance. Usually in meters.
 B3_API float b3World_GetContactRecycleDistance( b3WorldId worldId );
 
-/// Set the maximum linear speed. Usually in m/s.
+/// Set the maximum linear speed. Usually in m/s. Applies from the next step.
+/// @warning A speed limit alone does not guarantee collision safety. BlockGrid speculative admission
+/// predicts free motion over the current step. Later contact or joint impulses can change that motion,
+/// and rotational paths are not certified. Test the chosen speeds and timestep against the game's geometry.
 B3_API void b3World_SetMaximumLinearSpeed( b3WorldId worldId, float maximumLinearSpeed );
 
 /// Get the maximum linear speed. Usually in m/s.
 B3_API float b3World_GetMaximumLinearSpeed( b3WorldId worldId );
+
+/// Set the maximum angular speed in radians per second. Zero restores the Box3D default, which is the
+/// per-step rotation clamp and therefore scales with the step length. Applies from the next step.
+/// @warning As with b3World_SetMaximumLinearSpeed, test the chosen limit and timestep against thin
+/// geometry. Neither the rotation clamp nor speculative admission certifies the full rotational path.
+B3_API void b3World_SetMaximumAngularSpeed( b3WorldId worldId, float maximumAngularSpeed );
+
+/// Get the maximum angular speed in radians per second. Zero means the Box3D per-step default.
+B3_API float b3World_GetMaximumAngularSpeed( b3WorldId worldId );
+
+/// Set the maximum number of Projectile sweep candidates a single sweep may consider. Zero, the
+/// default, means unlimited. Applies from the next step.
+B3_API void b3World_SetProjectileCandidateCap( b3WorldId worldId, int projectileCandidateCap );
+
+/// Get the Projectile sweep candidate cap. Zero means unlimited.
+B3_API int b3World_GetProjectileCandidateCap( b3WorldId worldId );
 
 /// Enable/disable constraint warm starting. Advanced feature for testing. Disabling
 /// warm starting greatly reduces stability and provides no performance gain.
@@ -214,6 +238,11 @@ B3_API b3Profile b3World_GetProfile( b3WorldId worldId );
 
 /// Get world counters and sizes
 B3_API b3Counters b3World_GetCounters( b3WorldId worldId );
+
+/// Get BlockGrid Pair State memory and pair processing counters.
+/// Step counters describe the latest completed step. Persistent bytes are read from the current live Pair State total.
+/// An invalid world returns zero initialized counters.
+B3_API v3BlockGridPairCounters v3World_GetBlockGridPairCounters( b3WorldId worldId );
 
 /// Get max capacity. This can be used with b3WorldDef to avoid run-time allocations and copies
 B3_API b3Capacity b3World_GetMaxCapacity( b3WorldId worldId );
@@ -691,6 +720,15 @@ B3_API void b3Body_SetSleepThreshold( b3BodyId bodyId, float sleepThreshold );
 /// Get the sleep threshold, usually in meters per second.
 B3_API float b3Body_GetSleepThreshold( b3BodyId bodyId );
 
+/// Set the continuous collision safety factor. Smaller values engage continuous collision sooner
+/// but may increase work and visible motion hitches. Zero classifies any body with non-zero measured
+/// motion as fast. Values above 0.5 delay continuous collision and reduce protection.
+/// Recommended range [0.01, 0.5]. Non-dimensional.
+B3_API void b3Body_SetSafetyFactor( b3BodyId bodyId, float safetyFactor );
+
+/// Get the continuous collision safety factor. Non-dimensional.
+B3_API float b3Body_GetSafetyFactor( b3BodyId bodyId );
+
 /// Returns true if this body is enabled
 B3_API bool b3Body_IsEnabled( b3BodyId bodyId );
 
@@ -809,7 +847,7 @@ B3_API b3BodyTOIResult b3Body_TimeOfImpactMover( b3BodyId bodyId, b3Pos origin, 
  * Functions to create, destroy, and access.
  * Shapes bind raw geometry to bodies and hold material properties including friction and restitution.
  * You may add multiple shapes to a single body. There are no hard limits on shape count per body.
- * 
+ *
  * When you create a shape on a body the center of mass moves. This can lead to the body linear velocity
  * changing if the angular velocity is non-zero.
  * @{

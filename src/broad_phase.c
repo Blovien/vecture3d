@@ -12,6 +12,7 @@
 #include "physics_world.h"
 #include "platform.h"
 #include "shape.h"
+#include "v3_block_grid_shape.h"
 
 #include <string.h>
 
@@ -138,8 +139,7 @@ static bool b3BufferDynamicOverlapCallback( int proxyId, uint64_t userData, void
 void b3BroadPhase_BufferDynamicOverlaps( b3BroadPhase* bp, b3AABB aabb )
 {
 	// A voxel shape cannot be the moved query shape because its child tree is descended from the other shape.
-	b3DynamicTree_Query( bp->trees + b3_dynamicBody, aabb, B3_DEFAULT_MASK_BITS, false,
-						 b3BufferDynamicOverlapCallback, bp );
+	b3DynamicTree_Query( bp->trees + b3_dynamicBody, aabb, B3_DEFAULT_MASK_BITS, false, b3BufferDynamicOverlapCallback, bp );
 }
 
 typedef struct b3MovePair
@@ -167,7 +167,51 @@ typedef struct b3QueryPairContext
 
 	int compoundProxyId;
 	int compoundShapeIndex;
+
+	// Set while the moved proxy is itself a BlockGrid. The grid is then the
+	// query side, so the child index belongs to it rather than to whatever the
+	// tree query found, and the roles below have to be read the other way round.
+	bool queryShapeIsGrid;
+
+	// This worker's BlockGrid scratch, used by the grid descent below
+	v3BlockGridScratch* gridScratch;
 } b3QueryPairContext;
+
+static bool b3PairQueryCallback( int proxyId, uint64_t userData, void* context );
+
+// Bridges one grid hitbox back into b3PairQueryCallback when the grid is the
+// side that moved. The callback below fakes the descent the other direction
+// gets naturally, so the shared emit path sees the usual "inner query into a
+// container" shape.
+typedef struct b3GridPairContext
+{
+	b3QueryPairContext* queryContext;
+	int otherShapeIndex;
+	int otherProxyId;
+} b3GridPairContext;
+
+static bool b3GridQuerySidePairCallback( int hitboxIndex, uint64_t userData, void* context )
+{
+	B3_UNUSED( userData );
+	b3GridPairContext* gridPairs = (b3GridPairContext*)context;
+	b3QueryPairContext* queryContext = gridPairs->queryContext;
+
+	// This enters the shared emit tail as though it were an inner query while
+	// leaving the query side pointing at the grid, so the key still sorts both
+	// shape indices alongside the child and matches whatever the opposite
+	// direction would build. Keeping the roles as they are also lets the
+	// moved-proxy dedup below read the other shape's proxy, whereas swapping
+	// them would look tidier and quietly disable that check, emitting the pair
+	// twice whenever both sides move.
+	queryContext->compoundShapeIndex = gridPairs->otherShapeIndex;
+	queryContext->compoundProxyId = gridPairs->otherProxyId;
+
+	bool proceed = b3PairQueryCallback( gridPairs->otherProxyId, (uint64_t)hitboxIndex, queryContext );
+
+	queryContext->compoundShapeIndex = B3_NULL_INDEX;
+	queryContext->compoundProxyId = B3_NULL_INDEX;
+	return proceed;
+}
 
 // This is called from b3DynamicTree::Query when we are gathering pairs.
 static bool b3PairQueryCallback( int proxyId, uint64_t userData, void* context )
@@ -176,6 +220,7 @@ static bool b3PairQueryCallback( int proxyId, uint64_t userData, void* context )
 	b3World* world = queryContext->world;
 	int shapeIndex;
 	int childIndex = 0;
+	bool isBlockGridPair = false;
 
 	if ( queryContext->compoundShapeIndex == B3_NULL_INDEX )
 	{
@@ -189,7 +234,13 @@ static bool b3PairQueryCallback( int proxyId, uint64_t userData, void* context )
 		}
 
 		b3Shape* shape = b3Array_Get( world->shapes, shapeIndex );
-		if ( shape->type == b3_compoundShape || shape->type == b3_voxelShape )
+		if ( shape->type == v3_blockGridShape && queryContext->queryShapeIsGrid )
+		{
+			// Two grids keep one outer pair and leave hitbox enumeration to the pair module
+			childIndex = v3_blockGridPairChildIndex;
+			isBlockGridPair = true;
+		}
+		else if ( shape->type == b3_compoundShape || shape->type == b3_voxelShape )
 		{
 			// Query bounds are float world space, so the demoted transform is the matching float frame
 			b3Transform compoundTransform = b3ToRelativeTransform( b3GetBodyTransform( world, shape->bodyId ), b3Pos_zero );
@@ -199,11 +250,50 @@ static bool b3PairQueryCallback( int proxyId, uint64_t userData, void* context )
 			queryContext->compoundShapeIndex = shapeIndex;
 			queryContext->compoundProxyId = proxyId;
 
-			const b3CompoundData* compound =
-				shape->type == b3_compoundShape ? shape->compound : shape->voxel;
+			const b3CompoundData* compound = shape->type == b3_compoundShape ? shape->compound : shape->voxel;
 			b3DynamicTree_Query( &compound->tree, localAABB, B3_DEFAULT_MASK_BITS, false, b3PairQueryCallback, context );
 			queryContext->compoundShapeIndex = B3_NULL_INDEX;
 			queryContext->compoundProxyId = B3_NULL_INDEX;
+			return true;
+		}
+
+		else if ( shape->type == v3_blockGridShape )
+		{
+			// Same descent as a compound, but the grid has no BVH: its Occupancy
+			// Groups already narrow the field, so the query enumerates candidate
+			// hitboxes directly and reuses the child pair path unchanged.
+			b3Transform gridTransform = b3ToRelativeTransform( b3GetBodyTransform( world, shape->bodyId ), b3Pos_zero );
+			b3AABB localAABB = b3AABB_Transform( b3InvertTransform( gridTransform ), queryContext->aabb );
+
+			queryContext->compoundShapeIndex = shapeIndex;
+			queryContext->compoundProxyId = proxyId;
+			v3QueryBlockGridPairs( shape->blockGrid, localAABB, b3PairQueryCallback, context, queryContext->gridScratch );
+			queryContext->compoundShapeIndex = B3_NULL_INDEX;
+			queryContext->compoundProxyId = B3_NULL_INDEX;
+			return true;
+		}
+
+		else if ( queryContext->queryShapeIsGrid )
+		{
+			// Here the grid is the side that moved, which reverses the usual
+			// roles, so the shape the query found is the plain one, yet the child
+			// index still has to come from the grid. Enumerating the grid's
+			// hitboxes over that shape's bounds and emitting one pair each
+			// reproduces what the opposite direction gets for free by
+			// descending. Without it a moving grid would only ever meet bodies
+			// that moved under their own power, sliding straight through
+			// anything asleep.
+			b3Shape* gridShape = b3Array_Get( world->shapes, queryContext->queryShapeIndex );
+			b3Transform gridTransform = b3ToRelativeTransform( b3GetBodyTransform( world, gridShape->bodyId ), b3Pos_zero );
+			b3AABB localAABB = b3AABB_Transform( b3InvertTransform( gridTransform ), shape->fatAABB );
+
+			b3GridPairContext gridPairs = {
+				.queryContext = queryContext,
+				.otherShapeIndex = shapeIndex,
+				.otherProxyId = proxyId,
+			};
+			v3QueryBlockGridPairs( gridShape->blockGrid, localAABB, b3GridQuerySidePairCallback, &gridPairs,
+								   queryContext->gridScratch );
 			return true;
 		}
 	}
@@ -267,6 +357,12 @@ static bool b3PairQueryCallback( int proxyId, uint64_t userData, void* context )
 	// Order shapes so that B3_SHAPE_PAIR_KEY works correctly
 	int shapeIdA = shapeIndex;
 	int shapeIdB = queryContext->queryShapeIndex;
+	if ( isBlockGridPair && shapeIdB < shapeIdA )
+	{
+		int swap = shapeIdA;
+		shapeIdA = shapeIdB;
+		shapeIdB = swap;
+	}
 	b3Shape* shapeA = b3Array_Get( world->shapes, shapeIdA );
 	b3Shape* shapeB = b3Array_Get( world->shapes, shapeIdB );
 	int bodyIdA = shapeA->bodyId;
@@ -344,14 +440,16 @@ static void b3FindPairsTask( int startIndex, int endIndex, int workerIndex, void
 {
 	b3TracyCZoneNC( pair_task, "Pair Task", b3_colorAquamarine, true );
 
-	B3_UNUSED( workerIndex );
-
 	b3World* world = (b3World*)context;
 	b3BroadPhase* bp = &world->broadPhase;
 
 	b3QueryPairContext queryContext = { 0 };
 	queryContext.world = world;
 	queryContext.compoundShapeIndex = B3_NULL_INDEX;
+
+	// The grid descent below runs inside this task, so it takes this worker's scratch.
+	// A descent never nests, so one buffer per worker is enough.
+	queryContext.gridScratch = &world->taskContexts.data[workerIndex].blockGridScratch;
 
 	for ( int i = startIndex; i < endIndex; ++i )
 	{
@@ -373,9 +471,20 @@ static void b3FindPairsTask( int startIndex, int endIndex, int workerIndex, void
 		queryContext.queryShapeIndex = (int)b3DynamicTree_GetUserData( baseTree, proxyId );
 		queryContext.aabb = fatAABB;
 
-		// Compound shape collision invocation is not supported
-		B3_VALIDATE( world->shapes.data[queryContext.queryShapeIndex].type != b3_compoundShape &&
-					 world->shapes.data[queryContext.queryShapeIndex].type != b3_voxelShape );
+		// A pair key carries a single child index, so a moved container proxy
+		// would key one contact against child 0 alone. Compounds and voxels have
+		// no way to say which child, and they are static-only anyway, so they
+		// stay skipped. A grid moves, so it takes the reversed path instead:
+		// every shape the query finds gets the grid's overlapping hitboxes
+		// enumerated against it, one pair per hitbox.
+		b3ShapeType queryShapeType = world->shapes.data[queryContext.queryShapeIndex].type;
+		if ( queryShapeType == b3_compoundShape || queryShapeType == b3_voxelShape )
+		{
+			B3_ASSERT( false );
+			continue;
+		}
+
+		queryContext.queryShapeIsGrid = queryShapeType == v3_blockGridShape;
 
 		// Query trees. Only dynamic proxies collide with kinematic and static proxies.
 		// Using B3_DEFAULT_MASK_BITS so that b3Filter::groupIndex works.
@@ -413,7 +522,7 @@ static void b3UpdateTreesTask( void* context )
 	b3TracyCZoneEnd( tree_task );
 }
 
-void b3UpdateBroadPhasePairs( b3World* world )
+void b3UpdateBroadPhasePairs( b3World* world, bool createBlockGridPairs )
 {
 	b3BroadPhase* bp = &world->broadPhase;
 
@@ -477,7 +586,7 @@ void b3UpdateBroadPhasePairs( b3World* world )
 			b3Shape* shapeA = b3Array_Get( world->shapes, shapeIdA );
 			b3Shape* shapeB = b3Array_Get( world->shapes, shapeIdB );
 
-			b3CreateContact( world, shapeA, shapeB, childIndex );
+			b3CreateContact( world, shapeA, shapeB, childIndex, createBlockGridPairs );
 
 			if ( pair->heap )
 			{

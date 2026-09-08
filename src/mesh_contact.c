@@ -75,6 +75,7 @@ static int b3QueryHeightFieldTriangles( int* indices, int capacity, const b3Heig
 static void b3RefreshCache( b3Contact* contact, const b3Shape* shapeA, b3WorldTransform xfA, const b3AABB* bounds )
 {
 	B3_ASSERT( shapeA->type == b3_meshShape || shapeA->type == b3_heightShape );
+	B3_ASSERT( contact->kind == b3_meshContactKind );
 
 	b3MeshContact* meshContact = &contact->meshContact;
 

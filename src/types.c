@@ -23,6 +23,12 @@ b3WorldDef b3DefaultWorldDef( void )
 	// 400 meters per second, faster than the speed of sound
 	def.maximumLinearSpeed = 400.0f * lengthUnits;
 
+	// Zero is the documented sentinel for Box3D's own per-step rotation clamp, resolved at step time
+	def.maximumAngularSpeed = 0.0f;
+
+	// Zero means unlimited Projectile sweep candidates
+	def.projectileCandidateCap = 0;
+
 	def.enableSleep = true;
 	def.enableContinuous = true;
 	def.internalValue = B3_SECRET_COOKIE;
@@ -34,6 +40,7 @@ b3BodyDef b3DefaultBodyDef( void )
 	b3BodyDef def = { 0 };
 	def.type = b3_staticBody;
 	def.rotation = b3Quat_identity;
+	def.safetyFactor = 0.5f;
 	def.sleepThreshold = 0.05f * b3GetLengthUnitsPerMeter();
 	def.gravityScale = 1.0f;
 	def.enableSleep = true;

@@ -31,6 +31,11 @@ typedef struct b3ManifoldConstraint
 	b3Matrix2 tangentMass;
 	b3Vec2 frictionImpulse;
 	b3Vec3 rollingImpulse;
+
+	// A scalar contact may carry a different contact material for every manifold
+	float friction;
+	float restitution;
+	float rollingResistance;
 	float tangentVelocity1;
 	float tangentVelocity2;
 } b3ManifoldConstraint;
@@ -45,9 +50,6 @@ typedef struct b3ContactConstraint
 	b3Matrix3 invIA, invIB;
 	b3Softness softness;
 	b3Matrix3 rollingMass;
-	float friction;
-	float restitution;
-	float rollingResistance;
 	int manifoldCount;
 } b3ContactConstraint;
 

@@ -19,10 +19,15 @@
 #include "sensor.h"
 #include "shape.h"
 #include "solver_set.h"
+#include "v3_block_grid_contact.h"
+#include "v3_block_grid_events.h"
 
+#include <float.h>
 #include <limits.h>
+#include <math.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 _Static_assert( B3_RESTITUTION_ITERATIONS >= 1, "must be 1 or more" );
 
@@ -63,6 +68,127 @@ typedef struct b3WorkerContext
 	void* userTask;
 } b3WorkerContext;
 
+static void b3IntegrateBodyVelocity( const b3World* world, const b3BodySim* sim, const b3BodyState* state, float h,
+									 b3Vec3* linearVelocity, b3Vec3* angularVelocity )
+{
+	b3Vec3 v = state->linearVelocity;
+	b3Vec3 w = state->angularVelocity;
+	// Pade damping keeps the update stable without evaluating an exponential
+	float linearDamping = 1.0f / ( 1.0f + h * sim->linearDamping );
+	float angularDamping = 1.0f / ( 1.0f + h * sim->angularDamping );
+	// Kinematic bodies have zero inverse mass and therefore no gravity response
+	float gravityScale = sim->invMass > 0.0f ? sim->gravityScale : 0.0f;
+	b3Vec3 linearVelocityDelta = b3Blend2( h * sim->invMass, sim->force, h * gravityScale, world->gravity );
+	v = b3MulAdd( linearVelocityDelta, linearDamping, v );
+	b3Vec3 angularVelocityDelta = b3MulSV( h, b3MulMV( sim->invInertiaWorld, sim->torque ) );
+	w = b3MulAdd( angularVelocityDelta, angularDamping, w );
+
+	// Newton iteration solves gyroscopic torque in the local inertia frame
+	b3Quat q = b3MulQuat( state->deltaRotation, sim->transform.q );
+	b3Matrix3 inertiaLocal = b3InvertMatrix( sim->invInertiaLocal );
+	b3Vec3 omega1 = b3InvRotateVector( q, w );
+	b3Vec3 omega2 = omega1;
+	float i00 = inertiaLocal.cx.x;
+	float i01 = inertiaLocal.cy.x;
+	float i02 = inertiaLocal.cz.x;
+	float i11 = inertiaLocal.cy.y;
+	float i12 = inertiaLocal.cz.y;
+	float i22 = inertiaLocal.cz.z;
+
+	for ( int gyroIteration = 0; gyroIteration < B3_GYROSCOPIC_ITERATIONS; ++gyroIteration )
+	{
+		float w1 = omega2.x;
+		float w2 = omega2.y;
+		float w3 = omega2.z;
+		float Iw1 = i00 * w1 + i01 * w2 + i02 * w3;
+		float Iw2 = i01 * w1 + i11 * w2 + i12 * w3;
+		float Iw3 = i02 * w1 + i12 * w2 + i22 * w3;
+		// Residual is I * (omega2 - omega1) + h * cross(omega2, I * omega2)
+		b3Vec3 dw = b3Sub( omega2, omega1 );
+		b3Vec3 b = {
+			i00 * dw.x + i01 * dw.y + i02 * dw.z + h * ( w2 * Iw3 - w3 * Iw2 ),
+			i01 * dw.x + i11 * dw.y + i12 * dw.z + h * ( w3 * Iw1 - w1 * Iw3 ),
+			i02 * dw.x + i12 * dw.y + i22 * dw.z + h * ( w1 * Iw2 - w2 * Iw1 ),
+		};
+		// Jacobian is I + h * (skew(omega2) * I - skew(I * omega2))
+		b3Matrix3 J = {
+			{ i00 + h * ( w2 * i02 - w3 * i01 ), i01 + h * ( w3 * i00 - w1 * i02 - Iw3 ),
+			  i02 + h * ( w1 * i01 - w2 * i00 + Iw2 ) },
+			{ i01 + h * ( w2 * i12 - w3 * i11 + Iw3 ), i11 + h * ( w3 * i01 - w1 * i12 ),
+			  i12 + h * ( w1 * i11 - w2 * i01 - Iw1 ) },
+			{ i02 + h * ( w2 * i22 - w3 * i12 - Iw2 ), i12 + h * ( w3 * i02 - w1 * i22 + Iw1 ),
+			  i22 + h * ( w1 * i12 - w2 * i02 ) },
+		};
+		omega2 = b3Sub( omega2, b3Solve3( J, b ) );
+	}
+
+	*linearVelocity = v;
+	*angularVelocity = b3RotateVector( q, omega2 );
+}
+
+static void b3ApplyBodyMotionLimits( b3BodyState* state, float maxLinearVelocity, float maxAngularVelocity )
+{
+	// Motion locks act as the final velocity constraint before position integration
+	state->linearVelocity.x = ( state->flags & b3_lockLinearX ) ? 0.0f : state->linearVelocity.x;
+	state->linearVelocity.y = ( state->flags & b3_lockLinearY ) ? 0.0f : state->linearVelocity.y;
+	state->linearVelocity.z = ( state->flags & b3_lockLinearZ ) ? 0.0f : state->linearVelocity.z;
+	state->angularVelocity.x = ( state->flags & b3_lockAngularX ) ? 0.0f : state->angularVelocity.x;
+	state->angularVelocity.y = ( state->flags & b3_lockAngularY ) ? 0.0f : state->angularVelocity.y;
+	state->angularVelocity.z = ( state->flags & b3_lockAngularZ ) ? 0.0f : state->angularVelocity.z;
+
+	float maxLinearSpeedSquared = maxLinearVelocity * maxLinearVelocity;
+	// Both the real solver and enrollment prediction use the same speed caps
+	if ( b3Dot( state->linearVelocity, state->linearVelocity ) > maxLinearSpeedSquared )
+	{
+		float ratio = maxLinearVelocity / b3Length( state->linearVelocity );
+		state->linearVelocity = b3MulSV( ratio, state->linearVelocity );
+		state->flags |= b3_isSpeedCapped;
+	}
+
+	if ( b3Dot( state->angularVelocity, state->angularVelocity ) > maxAngularVelocity * maxAngularVelocity &&
+		 ( state->flags & b3_allowFastRotation ) == 0 )
+	{
+		float ratio = maxAngularVelocity / b3Length( state->angularVelocity );
+		state->angularVelocity = b3MulSV( ratio, state->angularVelocity );
+		state->flags |= b3_isSpeedCapped;
+	}
+}
+
+// Integrate a copy through the ordinary free-motion rules. Contact and joint
+// impulses generated later in the solve can change this predicted path.
+float b3ComputeFreeMotionDistance( const b3World* world, const b3BodySim* sim, const b3BodyState* initialState, float timeStep,
+								   int subStepCount )
+{
+	if ( timeStep <= 0.0f )
+	{
+		return 0.0f;
+	}
+	subStepCount = b3MaxInt( 1, subStepCount );
+	float h = timeStep / subStepCount;
+	float angularLimit = world->maxAngularSpeed > 0.0f ? world->maxAngularSpeed : B3_MAX_ROTATION * ( 1.0f / timeStep );
+	b3BodyState state = *initialState;
+	double translation = 0.0, angle = 0.0;
+	for ( int i = 0; i < subStepCount; ++i )
+	{
+		b3IntegrateBodyVelocity( world, sim, &state, h, &state.linearVelocity, &state.angularVelocity );
+		b3ApplyBodyMotionLimits( &state, world->maxLinearSpeed, angularLimit );
+		if ( !b3IsValidVec3( state.linearVelocity ) || !b3IsValidVec3( state.angularVelocity ) )
+		{
+			return -1.0f;
+		}
+		double vx = state.linearVelocity.x, vy = state.linearVelocity.y, vz = state.linearVelocity.z;
+		double wx = state.angularVelocity.x, wy = state.angularVelocity.y, wz = state.angularVelocity.z;
+		translation += h * sqrt( vx * vx + vy * vy + vz * vz );
+		angle += h * sqrt( wx * wx + wy * wy + wz * wz );
+		state.deltaRotation = b3IntegrateRotation( state.deltaRotation, b3MulSV( h, state.angularVelocity ) );
+	}
+	double x = sim->maxExtent.x, y = sim->maxExtent.y, z = sim->maxExtent.z;
+	double radius = sqrt( x * x + y * y + z * z );
+	// Every point is within two COM radii of its initial position, including fast rotation.
+	double distance = translation + radius * ( angle < 2.0 ? angle : 2.0 );
+	return isfinite( distance ) && distance < FLT_MAX ? nextafterf( (float)distance, INFINITY ) : -1.0f;
+}
+
 // Integrate velocities, apply damping, and gyroscopic torque
 static void b3IntegrateVelocitiesTask( b3SolverBlock block, b3StepContext* context )
 {
@@ -72,100 +198,13 @@ static void b3IntegrateVelocitiesTask( b3SolverBlock block, b3StepContext* conte
 
 	b3BodyState* states = context->states;
 	b3BodySim* sims = context->sims;
-
-	b3Vec3 gravity = context->world->gravity;
 	float h = context->h;
 
 	for ( int i = block.startIndex; i < block.startIndex + block.count; ++i )
 	{
 		b3BodySim* sim = sims + i;
 		b3BodyState* state = states + i;
-
-		b3Vec3 v = state->linearVelocity;
-		b3Vec3 w = state->angularVelocity;
-
-		// Damping math
-		// Differential equation: dv/dt + c * v = 0
-		// Solution: v(t) = v0 * exp(-c * t)
-		// Time step: v(t + dt) = v0 * exp(-c * (t + dt)) = v0 * exp(-c * t) * exp(-c * dt) = v(t) * exp(-c * dt)
-		// v2 = exp(-c * dt) * v1
-		// Pade approximation:
-		// v2 = v1 * 1 / (1 + c * dt)
-		float linearDamping = 1.0f / ( 1.0f + h * sim->linearDamping );
-		float angularDamping = 1.0f / ( 1.0f + h * sim->angularDamping );
-
-		// Gravity scale will be zero for kinematic bodies
-		float gravityScale = sim->invMass > 0.0f ? sim->gravityScale : 0.0f;
-
-		b3Vec3 linearVelocityDelta = b3Blend2( h * sim->invMass, sim->force, h * gravityScale, gravity );
-		v = b3MulAdd( linearVelocityDelta, linearDamping, v );
-
-		b3Vec3 angularVelocityDelta = b3MulSV( h, b3MulMV( sim->invInertiaWorld, sim->torque ) );
-		w = b3MulAdd( angularVelocityDelta, angularDamping, w );
-
-		// Gyroscopic torque by solving this nonlinear equation using Newton-Raphson.
-		// I * (w2 - w1) + h * cross(w2, I * w2) = 0
-		// This is all done in local coordinates where the Jacobian is easier to compute.
-		// This improves the simulation of long skinny bodies.
-		{
-			// Get current rotation.
-			b3Quat q0 = sim->transform.q;
-			b3Quat q = b3MulQuat( state->deltaRotation, q0 );
-
-			// todo wasteful computation
-			b3Matrix3 inertiaLocal = b3InvertMatrix( sim->invInertiaLocal );
-
-			// Compute local angular velocity
-			b3Vec3 omega1 = b3InvRotateVector( q, w );
-			b3Vec3 omega2 = omega1;
-
-			// Symmetric inertia tensor: 6 unique entries (column-major)
-			float i00 = inertiaLocal.cx.x;
-			float i01 = inertiaLocal.cy.x;
-			float i02 = inertiaLocal.cz.x;
-			float i11 = inertiaLocal.cy.y;
-			float i12 = inertiaLocal.cz.y;
-			float i22 = inertiaLocal.cz.z;
-
-			for ( int gyroIteration = 0; gyroIteration < B3_GYROSCOPIC_ITERATIONS; ++gyroIteration )
-			{
-				float w1 = omega2.x;
-				float w2 = omega2.y;
-				float w3 = omega2.z;
-
-				// Iw = I * omega2 (shared between residual and Jacobian)
-				float Iw1 = i00 * w1 + i01 * w2 + i02 * w3;
-				float Iw2 = i01 * w1 + i11 * w2 + i12 * w3;
-				float Iw3 = i02 * w1 + i12 * w2 + i22 * w3;
-
-				// Residual: b = I * (omega2 - omega1) + h * cross(omega2, I * omega2)
-				b3Vec3 dw = b3Sub( omega2, omega1 );
-				b3Vec3 b = {
-					i00 * dw.x + i01 * dw.y + i02 * dw.z + h * ( w2 * Iw3 - w3 * Iw2 ),
-					i01 * dw.x + i11 * dw.y + i12 * dw.z + h * ( w3 * Iw1 - w1 * Iw3 ),
-					i02 * dw.x + i12 * dw.y + i22 * dw.z + h * ( w1 * Iw2 - w2 * Iw1 ),
-				};
-
-				// Jacobian J = I + h * (skew(omega2) * I - skew(I * omega2))
-				// Jacobian derived by Erin Catto, Ph.D. Do not attempt to do this without a Ph.D.
-				// Doubled inertia terms above fold into Iw, e.g. row 2 col 1: i00*w3 - i02*w1 - Iw3.
-				b3Matrix3 J = {
-					{ i00 + h * ( w2 * i02 - w3 * i01 ), i01 + h * ( w3 * i00 - w1 * i02 - Iw3 ),
-					  i02 + h * ( w1 * i01 - w2 * i00 + Iw2 ) },
-					{ i01 + h * ( w2 * i12 - w3 * i11 + Iw3 ), i11 + h * ( w3 * i01 - w1 * i12 ),
-					  i12 + h * ( w1 * i11 - w2 * i01 - Iw1 ) },
-					{ i02 + h * ( w2 * i22 - w3 * i12 - Iw2 ), i12 + h * ( w3 * i02 - w1 * i22 + Iw1 ),
-					  i22 + h * ( w1 * i12 - w2 * i02 ) },
-				};
-
-				omega2 = b3Sub( omega2, b3Solve3( J, b ) );
-			}
-
-			w = b3RotateVector( q, omega2 );
-		}
-
-		state->linearVelocity = v;
-		state->angularVelocity = w;
+		b3IntegrateBodyVelocity( context->world, sim, state, h, &state->linearVelocity, &state->angularVelocity );
 	}
 
 	b3TracyCZoneEnd( integrate_velocity );
@@ -179,46 +218,13 @@ static void b3IntegratePositionsTask( b3SolverBlock block, b3StepContext* contex
 
 	b3BodyState* states = context->states;
 	float h = context->h;
-	float maxLinearSpeed = context->maxLinearVelocity;
-	float maxAngularSpeed = B3_MAX_ROTATION * context->inv_dt;
-	float maxLinearSpeedSquared = maxLinearSpeed * maxLinearSpeed;
-	float maxAngularSpeedSquared = maxAngularSpeed * maxAngularSpeed;
 
 	for ( int i = block.startIndex; i < block.startIndex + block.count; ++i )
 	{
 		b3BodyState* state = states + i;
-
-		b3Vec3 v = state->linearVelocity;
-		b3Vec3 w = state->angularVelocity;
-
-		// Motion locks - these can be viewed as a constraint that come last
-		v.x = ( state->flags & b3_lockLinearX ) ? 0.0f : v.x;
-		v.y = ( state->flags & b3_lockLinearY ) ? 0.0f : v.y;
-		v.z = ( state->flags & b3_lockLinearZ ) ? 0.0f : v.z;
-		w.x = ( state->flags & b3_lockAngularX ) ? 0.0f : w.x;
-		w.y = ( state->flags & b3_lockAngularY ) ? 0.0f : w.y;
-		w.z = ( state->flags & b3_lockAngularZ ) ? 0.0f : w.z;
-
-		// Clamp to max linear speed
-		if ( b3Dot( v, v ) > maxLinearSpeedSquared )
-		{
-			float ratio = maxLinearSpeed / b3Length( v );
-			v = b3MulSV( ratio, v );
-			state->flags |= b3_isSpeedCapped;
-		}
-
-		// Clamp to max angular speed
-		if ( b3Dot( w, w ) > maxAngularSpeedSquared && ( state->flags & b3_allowFastRotation ) == 0 )
-		{
-			float ratio = maxAngularSpeed / b3Length( w );
-			w = b3MulSV( ratio, w );
-			state->flags |= b3_isSpeedCapped;
-		}
-
-		state->linearVelocity = v;
-		state->angularVelocity = w;
-		state->deltaPosition = b3MulAdd( state->deltaPosition, h, v );
-		state->deltaRotation = b3IntegrateRotation( state->deltaRotation, b3MulSV( h, w ) );
+		b3ApplyBodyMotionLimits( state, context->maxLinearVelocity, context->maxAngularVelocity );
+		state->deltaPosition = b3MulAdd( state->deltaPosition, h, state->linearVelocity );
+		state->deltaRotation = b3IntegrateRotation( state->deltaRotation, b3MulSV( h, state->angularVelocity ) );
 	}
 
 	b3TracyCZoneEnd( integrate_positions );
@@ -314,9 +320,33 @@ static void b3SolveJointsTask( b3SolverBlock block, b3StepContext* context, bool
 
 #define B2_MAX_CONTINUOUS_SENSOR_HITS 8
 
+// BlockGrid counters are plain per-step increments that clamp instead of wrapping,
+// the same rule the pair pass uses.
+static uint64_t v3BlockGridSweepCountUp( uint64_t counter, uint64_t amount )
+{
+	return amount > UINT64_MAX - counter ? UINT64_MAX : counter + amount;
+}
+
+// Which trees a continuous pass sweeps, and which shapes it accepts from them.
+typedef enum b3ContinuousScope
+{
+	// Static tree only, every shape type. What a fast non-bullet body gets inside the
+	// finalize task, where other bodies' sweep anchors are still being written.
+	b3_continuousStatic,
+
+	// All three trees, every shape type. Bullets, in the stage that runs after finalize.
+	b3_continuousAll,
+
+	// Kinematic and dynamic trees, BlockGrid shapes only. The deferred pass that gives a
+	// fast non-bullet body the moving grids the finalize task could not read.
+	b3_continuousMovingBlockGrids,
+} b3ContinuousScope;
+
 typedef struct b3ContinuousContext
 {
 	b3World* world;
+	b3TaskContext* taskContext;
+	b3ContinuousScope scope;
 	b3BodySim* fastBodySim;
 	b3Shape* fastShape;
 	b3Vec3 centroid1, centroid2;
@@ -333,6 +363,11 @@ typedef struct b3ContinuousContext
 	int distanceIterations;
 	int pushBackIterations;
 	int rootIterations;
+
+	// Smallest accepted fraction of a BlockGrid sweep the candidate cap left without an
+	// answer. One means no sweep was exhausted. The body holds here even when it is
+	// zero, which is why it is tracked apart from fraction.
+	float holdFraction;
 } b3ContinuousContext;
 
 // This is called from b3DynamicTree_Query for continuous collision
@@ -378,10 +413,21 @@ static bool b3ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 		return true;
 	}
 
+	// The deferred pass exists for moving BlockGrids alone, so anything else the
+	// kinematic and dynamic trees hand it is not its business.
+	if ( continuousContext->scope == b3_continuousMovingBlockGrids && shape->type != v3_blockGridShape )
+	{
+		return true;
+	}
+
 	b3Body* body = b3Array_Get( world->bodies, shape->bodyId );
 
 	b3BodySim* bodySim = b3GetBodySim( world, body );
-	B3_ASSERT( body->type == b3_staticBody || ( fastBodySim->flags & b3_isBullet ) );
+
+	// A fast non-bullet body reaches a moving body only through the deferred BlockGrid
+	// pass, which runs after finalize where the anchors it reads are settled.
+	B3_ASSERT( body->type == b3_staticBody || ( fastBodySim->flags & b3_isBullet ) ||
+			   continuousContext->scope == b3_continuousMovingBlockGrids );
 
 	// Skip bullets
 	if ( bodySim->flags & b3_isBullet )
@@ -419,7 +465,37 @@ static bool b3ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 	b3Sweep sweepA = b3MakeRelativeSweep( bodySim, continuousContext->base );
 
 	// Time of impact versus shape. Supports all shape types
-	b3TOIOutput output = b3ShapeTimeOfImpact( shape, fastShape, &sweepA, &continuousContext->sweep, continuousContext->fraction );
+	b3TaskContext* taskContext = continuousContext->taskContext;
+	b3ShapeTOIResult sweepResult =
+		b3ShapeTimeOfImpact( shape, fastShape, &sweepA, &continuousContext->sweep, continuousContext->fraction,
+							 world->projectileCandidateCap, &taskContext->blockGridScratch );
+	b3TOIOutput output = sweepResult.output;
+
+	if ( sweepResult.sweptBlockGrid )
+	{
+		taskContext->blockGridSweepCount += 1;
+	}
+
+	if ( sweepResult.capExhausted )
+	{
+		// The cap left this sweep without an answer, so the fast body holds at the
+		// accepted fraction with its velocity untouched rather than accept an impact
+		// that may sit past a Hitbox nothing looked at. A hold is not a contact, so no
+		// pre-solve event and no sensor hit come out of it.
+		taskContext->blockGridCapExhaustionCount += 1;
+		if ( sweepResult.holdFraction < continuousContext->holdFraction )
+		{
+			continuousContext->holdFraction = sweepResult.holdFraction;
+		}
+
+		float exhaustedMs = b3GetMilliseconds( ticks );
+		if ( exhaustedMs > 1000.0f * b3GetStallThreshold() )
+		{
+			b3Log( "CCD stall: duration %.1f ms on an exhausted BlockGrid sweep", exhaustedMs );
+		}
+		return true;
+	}
+
 	if ( isSensor )
 	{
 		// Only accept a sensor hit that is sooner than the current solid hit.
@@ -472,8 +548,14 @@ static bool b3ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 	return true;
 }
 
-// Continuous collision of dynamic versus static
-static void b3SolveContinuous( b3World* world, int bodySimIndex, b3TaskContext* taskContext )
+// Continuous collision of one fast body against the trees its scope names.
+//
+// startCenter and startRotation are where the sweep begins. They are the body's own
+// anchors for the first pass over a body; the deferred BlockGrid pass passes the pose
+// the body held before that first pass advanced it, because the anchors have since
+// been moved to the accepted pose and the sweep between them would be empty.
+static void b3SolveContinuous( b3World* world, int bodySimIndex, b3TaskContext* taskContext, b3ContinuousScope scope,
+							   b3Pos startCenter, b3Quat startRotation )
 {
 	b3TracyCZoneNC( ccd, "CCD", b3_colorDarkGoldenRod, true );
 
@@ -481,12 +563,16 @@ static void b3SolveContinuous( b3World* world, int bodySimIndex, b3TaskContext* 
 
 	b3SolverSet* awakeSet = b3Array_Get( world->solverSets, b3_awakeSet );
 	b3BodySim* fastBodySim = b3Array_Get( awakeSet->bodySims, bodySimIndex );
-	B3_ASSERT( fastBodySim->flags & b3_isFast );
 
 	// Re-center the sweep on the fast body so the TOI and the swept query stay in float precision
-	b3Pos base = fastBodySim->center0;
+	b3Pos base = startCenter;
 
-	b3Sweep sweep = b3MakeRelativeSweep( fastBodySim, base );
+	b3Sweep sweep;
+	sweep.c1 = b3SubPos( startCenter, base );
+	sweep.c2 = b3SubPos( fastBodySim->center, base );
+	sweep.q1 = startRotation;
+	sweep.q2 = fastBodySim->transform.q;
+	sweep.localCenter = fastBodySim->localCenter;
 
 	b3Transform xf1;
 	xf1.q = sweep.q1;
@@ -503,12 +589,13 @@ static void b3SolveContinuous( b3World* world, int bodySimIndex, b3TaskContext* 
 
 	b3ContinuousContext context = { 0 };
 	context.world = world;
+	context.taskContext = taskContext;
+	context.scope = scope;
 	context.sweep = sweep;
 	context.base = base;
 	context.fastBodySim = fastBodySim;
 	context.fraction = 1.0f;
-
-	bool isBullet = ( fastBodySim->flags & b3_isBullet ) != 0;
+	context.holdFraction = 1.0f;
 
 	int shapeId = fastBody->headShapeId;
 	while ( shapeId != B3_NULL_INDEX )
@@ -520,15 +607,24 @@ static void b3SolveContinuous( b3World* world, int bodySimIndex, b3TaskContext* 
 		context.centroid1 = b3TransformPoint( xf1, fastShape->localCentroid );
 		context.centroid2 = b3TransformPoint( xf2, fastShape->localCentroid );
 
-		b3AABB box1 = fastShape->aabb;
+		// The first pass over a body leaves fastShape->aabb at the pose it accepted, so the
+		// deferred pass cannot read the start box off the shape and computes it from xf1.
+		b3AABB box1 =
+			scope == b3_continuousMovingBlockGrids ? b3OffsetAABB( b3ComputeShapeAABB( fastShape, xf1 ), base ) : fastShape->aabb;
+
 		// xf2 is relative to the base, so translate the box back to world space, rounding outward
 		b3AABB box2 = b3OffsetAABB( b3ComputeShapeAABB( fastShape, xf2 ), base );
 
 		// Store this to avoid double computation in the case there is no impact event
 		fastShape->aabb = box2;
 
-		// No continuous collision for meshes
-		if ( fastShape->type == b3_meshShape || fastShape->type == b3_heightShape )
+		// Concave containers are swept against rather than swept, because the
+		// path below builds a single proxy for whichever shape is moving and a
+		// grid is a field of hitboxes with no single proxy to build. A dynamic
+		// grid travelling fast enough to want this leans on the discrete path
+		// and its fat AABB margins instead.
+		if ( fastShape->type == b3_meshShape || fastShape->type == b3_heightShape || fastShape->type == b3_compoundShape ||
+			 fastShape->type == b3_voxelShape || fastShape->type == v3_blockGridShape )
 		{
 			continue;
 		}
@@ -540,13 +636,26 @@ static void b3SolveContinuous( b3World* world, int bodySimIndex, b3TaskContext* 
 		}
 
 		b3AABB sweptBox = b3AABB_Union( box1, box2 );
-		b3DynamicTree_Query( staticTree, sweptBox, B3_DEFAULT_MASK_BITS, false, b3ContinuousQueryCallback, &context );
+		if ( scope != b3_continuousMovingBlockGrids )
+		{
+			b3DynamicTree_Query( staticTree, sweptBox, B3_DEFAULT_MASK_BITS, false, b3ContinuousQueryCallback, &context );
+		}
 
-		if ( isBullet )
+		if ( scope != b3_continuousStatic )
 		{
 			b3DynamicTree_Query( kinematicTree, sweptBox, B3_DEFAULT_MASK_BITS, false, b3ContinuousQueryCallback, &context );
 			b3DynamicTree_Query( dynamicTree, sweptBox, B3_DEFAULT_MASK_BITS, false, b3ContinuousQueryCallback, &context );
 		}
+	}
+
+	// A hold beats an impact it precedes: nothing looked at what sits between them, so
+	// the body may not pass the hold. A zero hold leaves the body exactly where it
+	// started, which the impact branch below reproduces by interpolating at zero.
+	bool held = context.holdFraction < context.fraction;
+	if ( held )
+	{
+		context.fraction = context.holdFraction;
+		fastBodySim->flags |= b3_hadTimeOfImpact;
 	}
 
 	const float speculativeScalar = B3_SPECULATIVE_DISTANCE;
@@ -692,8 +801,6 @@ static void b3FinalizeBodiesTask( int startIndex, int endIndex, int workerIndex,
 
 		b3Vec3 v = state->linearVelocity;
 		b3Vec3 w = state->angularVelocity;
-		b3Vec3 localOmega = b3InvRotateVector( sim->transform.q, w );
-		b3Vec3 localDeltaRotation = b3InvRotateVector( sim->transform.q, state->deltaRotation.v );
 
 		if ( b3IsValidVec3( v ) == false || b3IsValidVec3( w ) == false )
 		{
@@ -704,18 +811,12 @@ static void b3FinalizeBodiesTask( int startIndex, int endIndex, int workerIndex,
 		B3_ASSERT( b3IsValidVec3( v ) );
 		B3_ASSERT( b3IsValidVec3( w ) );
 
+		b3BodyMotion motion = b3ComputeBodyMotion( sim, state );
 		sim->center = b3OffsetPos( sim->center, state->deltaPosition );
 		sim->transform.q = b3NormalizeQuat( b3MulQuat( state->deltaRotation, sim->transform.q ) );
 
-		// Use the velocity of the farthest point on the body to account for rotation.
-		b3Vec3 velocityArc = b3ModifiedCross( b3Abs( localOmega ), sim->maxExtent );
-		float maxVelocity = b3Length( v ) + b3Length( velocityArc );
-
-		// Sleep needs to observe position correction as well as true velocity.
-		// q = [sin(theta/2) * v, cos(theta/2)]
-		// for small angles abs(theta) ~= 2 * length(sin(theta/2) * v)
-		b3Vec3 rotationArc = b3ModifiedCross( b3Abs( localDeltaRotation ), sim->maxExtent );
-		float maxDeltaPosition = b3Length( state->deltaPosition ) + 2.0f * b3Length( rotationArc );
+		float maxVelocity = motion.maxVelocity;
+		float maxDeltaPosition = motion.maxDeltaPosition;
 
 		// Position correction is not as important for sleep as true velocity.
 		float positionSleepFactor = 0.5f;
@@ -756,12 +857,10 @@ static void b3FinalizeBodiesTask( int startIndex, int endIndex, int workerIndex,
 			// Body is not sleepy
 			body->sleepTime = 0.0f;
 
-			const float safetyFactor = 0.5f;
-			float maxMotion = b3MaxFloat( maxDeltaPosition, maxVelocity * timeStep );
-			if ( body->type == b3_dynamicBody && enableContinuous && maxMotion > safetyFactor * sim->minExtent )
+			if ( body->type == b3_dynamicBody && enableContinuous && b3BodyNeedsContinuousMotion( body, sim, motion, timeStep ) )
 			{
-				// This flag is only retained for debug draw
-				sim->flags |= b3_isFast;
+				// This flag is used for debug draw and contact recycling.
+				body->flags |= b3_isFast;
 
 				// Store in fast array for the continuous collision stage
 				// This is deterministic because the order of TOI sweeps doesn't matter
@@ -772,7 +871,23 @@ static void b3FinalizeBodiesTask( int startIndex, int endIndex, int workerIndex,
 				}
 				else
 				{
-					b3SolveContinuous( world, simIndex, taskContext );
+					// This task runs while other bodies' sweep anchors are still being written,
+					// so a non-bullet body sweeps the static tree here and nothing else. Its
+					// kinematic and dynamic BlockGrid candidates are swept after this stage,
+					// from the pose recorded here, because this pass overwrites the anchors.
+					b3Pos startCenter = sim->center0;
+					b3Quat startRotation = sim->rotation0;
+					b3SolveContinuous( world, simIndex, taskContext, b3_continuousStatic, startCenter, startRotation );
+
+					if ( world->blockGridShapeCount > 0 )
+					{
+						int deferredIndex = b3AtomicFetchAddInt( &stepContext->deferredGridSweepCount, 1 );
+						stepContext->deferredGridSweeps[deferredIndex] = (b3DeferredGridSweep){
+							.bodySimIndex = simIndex,
+							.startCenter = startCenter,
+							.startRotation = startRotation,
+						};
+					}
 				}
 			}
 			else
@@ -818,7 +933,7 @@ static void b3FinalizeBodiesTask( int startIndex, int endIndex, int workerIndex,
 
 		// Update shapes AABBs
 		b3WorldTransform transform = sim->transform;
-		bool isFast = ( sim->flags & b3_isFast ) != 0;
+		bool isFast = ( body->flags & b3_isFast ) != 0;
 		int shapeId = body->headShapeId;
 		while ( shapeId != B3_NULL_INDEX )
 		{
@@ -1422,10 +1537,55 @@ static void b3BulletBodyTask( int startIndex, int endIndex, int workerIndex, voi
 	for ( int i = startIndex; i < endIndex; ++i )
 	{
 		int simIndex = stepContext->bulletBodies[i];
-		b3SolveContinuous( stepContext->world, simIndex, taskContext );
+		b3SolverSet* awakeSet = b3Array_Get( stepContext->world->solverSets, b3_awakeSet );
+		b3BodySim* bulletSim = b3Array_Get( awakeSet->bodySims, simIndex );
+		b3SolveContinuous( stepContext->world, simIndex, taskContext, b3_continuousAll, bulletSim->center0,
+						   bulletSim->rotation0 );
 	}
 
 	b3TracyCZoneEnd( bullet_body_task );
+}
+
+static int b3CompareDeferredGridSweeps( const void* a, const void* b )
+{
+	const b3DeferredGridSweep* left = a;
+	const b3DeferredGridSweep* right = b;
+	return left->bodySimIndex < right->bodySimIndex ? -1 : ( left->bodySimIndex > right->bodySimIndex ? 1 : 0 );
+}
+
+// Fast non-bullet bodies sweeping the BlockGrids on kinematic and dynamic bodies.
+//
+// The finalize task cannot do this: it runs in parallel with those bodies writing
+// their own center0 and rotation0, which is exactly what a sweep against them reads.
+// Here every anchor in the world is settled, so the sweep is stable. The pass reruns
+// the body's own sweep from the pose it held before finalize advanced it, so an
+// impact found here composes with the static impact found there rather than
+// replacing it. It accepts BlockGrid shapes only; everything else on those two trees
+// is out of scope for this ticket and keeps the behaviour it has today.
+//
+// It runs on one worker rather than in parallel. A fast non-bullet body that carries a
+// BlockGrid of its own is both a sweeper and something another entry sweeps against, and
+// in parallel one entry would read the anchors another is writing. The pass is short, it
+// only runs for fast non-bullet bodies in a world that has a BlockGrid at all, and alpha
+// runs one physics worker regardless.
+static void b3SolveDeferredGridSweeps( b3World* world, b3StepContext* stepContext, int count )
+{
+	b3TracyCZoneNC( deferred_grid_task, "Deferred Grid Sweep", b3_colorLightSkyBlue, true );
+
+	// The finalize task fills the array in whatever order its workers reach it. Sorting by
+	// body puts the pass in a fixed order, so a body that both sweeps and is swept against
+	// cannot make the step depend on how the workers interleaved.
+	qsort( stepContext->deferredGridSweeps, (size_t)count, sizeof( b3DeferredGridSweep ), b3CompareDeferredGridSweeps );
+
+	b3TaskContext* taskContext = b3Array_Get( world->taskContexts, 0 );
+	for ( int i = 0; i < count; ++i )
+	{
+		const b3DeferredGridSweep* entry = stepContext->deferredGridSweeps + i;
+		b3SolveContinuous( world, entry->bodySimIndex, taskContext, b3_continuousMovingBlockGrids, entry->startCenter,
+						   entry->startRotation );
+	}
+
+	b3TracyCZoneEnd( deferred_grid_task );
 }
 
 #if B3_SIMD_WIDTH == 4
@@ -1456,6 +1616,12 @@ void b3Solve( b3World* world, b3StepContext* stepContext )
 		// Prepare buffers for continuous collision (fast bodies)
 		b3AtomicStoreInt( &stepContext->bulletBodyCount, 0 );
 		stepContext->bulletBodies = (int*)b3StackAlloc( &world->stack, awakeBodyCount * sizeof( int ), "bullet bodies" );
+
+		// Room for every awake body, since any of them may turn out to be a fast
+		// non-bullet with a BlockGrid to sweep after this stage.
+		b3AtomicStoreInt( &stepContext->deferredGridSweepCount, 0 );
+		stepContext->deferredGridSweeps = (b3DeferredGridSweep*)b3StackAlloc(
+			&world->stack, awakeBodyCount * sizeof( b3DeferredGridSweep ), "deferred grid sweeps" );
 
 		b3ConstraintGraph* graph = &world->constraintGraph;
 		b3GraphColor* colors = graph->colors;
@@ -2018,6 +2184,11 @@ void b3Solve( b3World* world, b3StepContext* stepContext )
 
 					bool found = false;
 					int triangleIndex = 0;
+					int manifoldIndex = 0;
+					int pointIndex = 0;
+					float totalNormalImpulse = 0.0f;
+					uint64_t pointKey = UINT64_MAX;
+					bool isBlockGridPair = contact->kind == v3_blockGridPairContactKind;
 					int manifoldCount = contact->manifoldCount;
 					for ( int i = 0; i < manifoldCount; ++i )
 					{
@@ -2027,14 +2198,23 @@ void b3Solve( b3World* world, b3StepContext* stepContext )
 						{
 							b3ManifoldPoint* mp = manifold->points + p;
 							float approachSpeed = -mp->normalVelocity;
+							uint64_t candidateKey = isBlockGridPair ? v3BlockGridPairPointKey( contact, i, p ) : UINT64_MAX;
+							bool faster = approachSpeed > event.approachSpeed;
+							bool strongerTie = isBlockGridPair && found && approachSpeed == event.approachSpeed &&
+											   ( mp->totalNormalImpulse > totalNormalImpulse ||
+												 ( mp->totalNormalImpulse == totalNormalImpulse && candidateKey < pointKey ) );
 
 							// Need to check total impulse because the point may be speculative and not colliding
-							if ( approachSpeed > event.approachSpeed && mp->totalNormalImpulse > 0.0f )
+							if ( ( faster || strongerTie ) && mp->totalNormalImpulse > 0.0f )
 							{
 								event.approachSpeed = approachSpeed;
 								event.point = b3OffsetPos( midCenter, b3Lerp( mp->anchorA, mp->anchorB, 0.5f ) );
 								event.normal = manifold->normal;
 								triangleIndex = mp->triangleIndex;
+								manifoldIndex = i;
+								pointIndex = p;
+								totalNormalImpulse = mp->totalNormalImpulse;
+								pointKey = candidateKey;
 								found = true;
 							}
 						}
@@ -2052,12 +2232,34 @@ void b3Solve( b3World* world, b3StepContext* stepContext )
 							.generation = contact->generation,
 						};
 
-						// shapeB is never a compound today (asserted in b3CreateContact), so the
-						// childIndex argument is irrelevant for it. shapeA carries the compound.
-						event.userMaterialIdA = b3GetShapeUserMaterialId( shapeA, contact->childIndex, triangleIndex );
-						event.userMaterialIdB = b3GetShapeUserMaterialId( shapeB, 0, triangleIndex );
+						bool materialIdsResolved = true;
+						if ( isBlockGridPair )
+						{
+							// The two struck hitboxes name the materials, the way a struck triangle
+							// names a mesh material; b3GetShapeUserMaterialId reads them for a grid
+							int hitboxIndexA;
+							int hitboxIndexB;
+							materialIdsResolved =
+								v3BlockGridPairPointHitboxes( contact, manifoldIndex, pointIndex, &hitboxIndexA, &hitboxIndexB );
+							if ( materialIdsResolved )
+							{
+								event.userMaterialIdA = b3GetShapeUserMaterialId( shapeA, hitboxIndexA, triangleIndex );
+								event.userMaterialIdB = b3GetShapeUserMaterialId( shapeB, hitboxIndexB, triangleIndex );
+							}
+						}
+						else
+						{
+							// shapeB is never a compound today (asserted in b3CreateContact), so the
+							// childIndex argument is irrelevant for it. shapeA carries the compound.
+							event.userMaterialIdA = b3GetShapeUserMaterialId( shapeA, contact->childIndex, triangleIndex );
+							event.userMaterialIdB = b3GetShapeUserMaterialId( shapeB, 0, triangleIndex );
+						}
 
-						b3Array_Push( world->contactHitEvents, event );
+						if ( materialIdsResolved )
+						{
+							v3BlockContactEventsPushHit( world, contact, manifoldIndex, pointIndex, &event );
+							b3Array_Push( world->contactHitEvents, event );
+						}
 					}
 
 					// Clear the smallest set bit
@@ -2119,7 +2321,7 @@ void b3Solve( b3World* world, b3StepContext* stepContext )
 					b3Body* body = bodyArray + bodySim->bodyId;
 
 					int shapeId = body->headShapeId;
-					if ( ( bodySim->flags & ( b3_isBullet | b3_isFast ) ) == ( b3_isBullet | b3_isFast ) )
+					if ( ( body->flags & ( b3_isBullet | b3_isFast ) ) == ( b3_isBullet | b3_isFast ) )
 					{
 						// Fast bullet bodies don't have their final AABB yet
 						while ( shapeId != B3_NULL_INDEX )
@@ -2234,9 +2436,77 @@ void b3Solve( b3World* world, b3StepContext* stepContext )
 		b3TracyCZoneEnd( bullets );
 	}
 
+	// Fast non-bullet bodies against the BlockGrids on moving bodies. This runs after
+	// the bullet stage so every sweep anchor in the world, bullets included, is settled.
+	int deferredGridSweepCount = b3AtomicLoadInt( &stepContext->deferredGridSweepCount );
+	if ( deferredGridSweepCount > 0 )
+	{
+		b3TracyCZoneNC( deferredGrids, "Deferred Grid Sweeps", b3_colorDarkGoldenRod, true );
+
+		b3SolveDeferredGridSweeps( world, stepContext, deferredGridSweepCount );
+
+		// Serially publish any bounds this pass enlarged. The refit stage has already
+		// run, so these proxies have to reach the tree here the way bullet proxies do.
+		b3BroadPhase* broadPhase = &world->broadPhase;
+		b3Body* bodyArray = world->bodies.data;
+		b3BodySim* bodySimArray = awakeSet->bodySims.data;
+		b3Shape* shapeArray = world->shapes.data;
+
+		for ( int i = 0; i < deferredGridSweepCount; ++i )
+		{
+			b3BodySim* bodySim = bodySimArray + stepContext->deferredGridSweeps[i].bodySimIndex;
+			if ( ( bodySim->flags & b3_enlargeBounds ) == 0 )
+			{
+				continue;
+			}
+			bodySim->flags &= ~b3_enlargeBounds;
+
+			b3Body* body = bodyArray + bodySim->bodyId;
+			int shapeId = body->headShapeId;
+			while ( shapeId != B3_NULL_INDEX )
+			{
+				b3Shape* shape = shapeArray + shapeId;
+				shapeId = shape->nextShapeId;
+
+				if ( ( shape->flags & b3_enlargedAABB ) == 0 )
+				{
+					continue;
+				}
+				shape->flags &= ~b3_enlargedAABB;
+				b3BroadPhase_EnlargeProxy( broadPhase, shape->proxyKey, shape->fatAABB );
+			}
+		}
+
+		b3TracyCZoneEnd( deferredGrids );
+	}
+
+	// The stack is last in first out, so the deferred array goes back before the bullet
+	// array it was taken after.
+	b3StackFree( &world->stack, stepContext->deferredGridSweeps );
+	stepContext->deferredGridSweeps = NULL;
+	b3AtomicStoreInt( &stepContext->deferredGridSweepCount, 0 );
+
 	b3StackFree( &world->stack, stepContext->bulletBodies );
 	stepContext->bulletBodies = NULL;
 	b3AtomicStoreInt( &stepContext->bulletBodyCount, 0 );
+
+	// BlockGrid Projectile sweep counters. The pair pass rebuilds the published struct
+	// from zero earlier in the step, so folding here neither doubles nor is overwritten.
+	// The per worker tallies are cleared with the fold so the next step starts empty.
+	{
+		v3BlockGridPairCounters counters = world->blockGridPairCounters;
+		for ( int i = 0; i < world->workerCount; ++i )
+		{
+			b3TaskContext* taskContext = world->taskContexts.data + i;
+			counters.projectileSweepCount =
+				v3BlockGridSweepCountUp( counters.projectileSweepCount, taskContext->blockGridSweepCount );
+			counters.capExhaustionCount =
+				v3BlockGridSweepCountUp( counters.capExhaustionCount, taskContext->blockGridCapExhaustionCount );
+			taskContext->blockGridSweepCount = 0;
+			taskContext->blockGridCapExhaustionCount = 0;
+		}
+		world->blockGridPairCounters = counters;
+	}
 
 	// Report sensor hits. This may include bullets sensor hits.
 	{

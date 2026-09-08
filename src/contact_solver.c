@@ -12,6 +12,7 @@
 #include "platform.h"
 #include "simd.h"
 #include "solver_set.h"
+#include "v3_block_grid_contact.h"
 
 #if B3_ENABLE_VALIDATION
 #include "shape.h"
@@ -25,6 +26,28 @@
 // s(t) = s0 + dot(cB0 + dpB + rot(dqB, rB0) - cA0 - dpA - rot(dqA, rA0), normal)
 // s(t) = s0 + dot(cB0 - cA0, normal) + dot(dpB - dpA + rot(dqB, rB0) - rot(dqA, rA0), normal)
 // s_base = s0 + dot(cB0 - cA0, normal)
+
+static b3ContactMaterial b3GetScalarManifoldMaterial( const b3Contact* contact, int manifoldIndex )
+{
+	// Ordinary scalar contacts repeat the parent material, while an aggregate selects one per manifold
+	if ( contact->kind != v3_blockGridPairContactKind )
+	{
+		return (b3ContactMaterial){
+			.friction = contact->friction,
+			.restitution = contact->restitution,
+			.rollingResistance = contact->rollingResistance,
+			.tangentVelocity = contact->tangentVelocity,
+		};
+	}
+
+	const b3ContactMaterial* materials = v3BlockGridPairContactMaterials( contact->blockGridPair.state );
+	B3_ASSERT( materials != NULL && manifoldIndex < v3BlockGridPairManifoldCount( contact->blockGridPair.state ) );
+	if ( materials == NULL || manifoldIndex >= v3BlockGridPairManifoldCount( contact->blockGridPair.state ) )
+	{
+		return (b3ContactMaterial){ 0 };
+	}
+	return materials[manifoldIndex];
+}
 
 // Prepare a mesh constraints
 void b3PrepareContacts_Mesh( b3SolverBlock block, b3StepContext* context )
@@ -159,10 +182,6 @@ void b3PrepareContacts_Mesh( b3SolverBlock block, b3StepContext* context )
 			contactConstraint->rollingMass = b3InvertMatrix( b3AddMM( iA, iB ) );
 			contactConstraint->softness =
 				( contact->flags & b3_contactStaticFlag ) != 0 ? context->staticSoftness : context->contactSoftness;
-			contactConstraint->friction = contact->friction;
-			contactConstraint->restitution = contact->restitution;
-			contactConstraint->rollingResistance = contact->rollingResistance;
-
 			b3ManifoldConstraint* manifoldConstraints = manifoldBase + specs[localIndex].manifoldStart;
 			contactConstraint->constraints = manifoldConstraints;
 
@@ -180,9 +199,14 @@ void b3PrepareContacts_Mesh( b3SolverBlock block, b3StepContext* context )
 				constraint->tangent1 = tangent1;
 				constraint->tangent2 = tangent2;
 
+				b3ContactMaterial contactMaterial = b3GetScalarManifoldMaterial( contact, manifoldIndex );
+				constraint->friction = contactMaterial.friction;
+				constraint->restitution = contactMaterial.restitution;
+				constraint->rollingResistance = contactMaterial.rollingResistance;
+
 				// Stiffer for static contacts to avoid bodies getting pushed through the ground
-				constraint->tangentVelocity1 = b3Dot( contact->tangentVelocity, constraint->tangent1 );
-				constraint->tangentVelocity2 = b3Dot( contact->tangentVelocity, constraint->tangent2 );
+				constraint->tangentVelocity1 = b3Dot( contactMaterial.tangentVelocity, constraint->tangent1 );
+				constraint->tangentVelocity2 = b3Dot( contactMaterial.tangentVelocity, constraint->tangent2 );
 
 				b3Vec3 centerA = b3Vec3_zero;
 				b3Vec3 centerB = b3Vec3_zero;
@@ -414,12 +438,11 @@ void b3SolveContacts_Mesh( b3SolverBlock block, b3StepContext* context, bool use
 
 		b3Vec3 dp = b3Sub( stateB->deltaPosition, stateA->deltaPosition );
 		b3Softness softness = contactConstraint->softness;
-		float friction = contactConstraint->friction;
-		float rollingResistance = contactConstraint->rollingResistance;
-
 		for ( int j = 0; j < manifoldCount; ++j )
 		{
 			b3ManifoldConstraint* constraint = contactConstraint->constraints + j;
+			float friction = constraint->friction;
+			float rollingResistance = constraint->rollingResistance;
 
 			int pointCount = constraint->pointCount;
 			b3Vec3 normal = constraint->normal;
@@ -601,11 +624,6 @@ void b3ApplyRestitution_Mesh( b3SolverBlock block, b3StepContext* context )
 	for ( int constraintIndex = startIndex; constraintIndex < endIndex; ++constraintIndex )
 	{
 		const b3ContactConstraint* contactConstraint = constraints + constraintIndex;
-		float restitution = contactConstraint->restitution;
-		if ( restitution == 0.0f )
-		{
-			continue;
-		}
 
 		int indexA = contactConstraint->indexA;
 		int indexB = contactConstraint->indexB;
@@ -627,6 +645,11 @@ void b3ApplyRestitution_Mesh( b3SolverBlock block, b3StepContext* context )
 		for ( int manifoldIndex = 0; manifoldIndex < manifoldCount; ++manifoldIndex )
 		{
 			b3ManifoldConstraint* cm = contactConstraint->constraints + manifoldIndex;
+			float restitution = cm->restitution;
+			if ( restitution == 0.0f )
+			{
+				continue;
+			}
 
 			b3Vec3 normal = cm->normal;
 			int pointCount = cm->pointCount;

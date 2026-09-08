@@ -15,6 +15,8 @@
 #include <stdio.h>
 #include <string.h>
 
+typedef struct v3BlockGridData v3BlockGridData;
+
 // FNV-1a 64-bit constants
 #define B3_SNAP_FNV_INIT 14695981039346656037ull
 #define B3_SNAP_FNV_PRIME 1099511628211ull
@@ -47,12 +49,22 @@ typedef struct b3World b3World;
 #define B3_REC_MAGIC 0x43523342u
 
 // Major recording version is bumped when writers change.
-// Major version 5 added b3PlaneResult fields.
-#define B3_REC_VERSION_MAJOR 5
+// Major version 15 preserves BlockGrid contact capacities while retaining legacy voxel shapes.
+#define B3_REC_VERSION_MAJOR 15
 
-// Minor tracks op-stream additions that keep the 48 byte header shape.
-// Minor version 4 added b3Shape_SetMeshMaterial, b3Shape_SetHull, b3Shape_SetMesh
-#define B3_REC_VERSION_MINOR 4
+// Minor tracks additive operations whose absence does not change simulation
+#define B3_REC_VERSION_MINOR 0
+
+enum b3ContactMaterialPolicyKind
+{
+	b3_contactMaterialPolicyUnsupported,
+	b3_contactMaterialPolicyBuiltin,
+};
+
+enum b3ContactMaterialPolicyVersion
+{
+	b3_contactMaterialPolicyBuiltinVersion = 1,
+};
 
 // File header, fixed 48 bytes. Contains the registry locator so the player
 // can load geometry before replaying any ops.
@@ -66,7 +78,8 @@ typedef struct b3RecHeader
 	uint8_t validationEnabled; // 1 if built with BOX3D_VALIDATE, diagnostic only
 	uint8_t reserved;
 	float lengthScale; // b3GetLengthUnitsPerMeter()
-	uint32_t reserved2;
+	uint16_t materialPolicyKind;
+	uint16_t materialPolicyVersion;
 	uint32_t reserved3;			// explicit pad so the 64-bit fields align with no implicit gap
 	uint64_t snapshotSize;		// bytes of snapshot blob after the header (0 in Phase 1)
 	uint64_t registryOffset;	// absolute offset to trailing registry block, backpatched at stop
@@ -92,6 +105,7 @@ typedef enum b3GeometryKind
 	b3_geometryMesh,
 	b3_geometryHeightField,
 	b3_geometryCompound,
+	v3_geometryBlockGrid,
 } b3GeometryKind;
 
 // One entry per unique geometry blob. id == index in the entries array.
@@ -373,6 +387,8 @@ uint32_t b3RecInternMesh( b3Recording* rec, const b3MeshData* mesh );
 uint32_t b3RecInternHeightField( b3Recording* rec, const b3HeightFieldData* hf );
 uint32_t b3RecInternCompound( b3Recording* rec, const b3CompoundData* compound );
 
+uint32_t b3RecInternBlockGrid( b3Recording* rec, const v3BlockGridData* grid );
+
 // Lifecycle engine-side hooks
 void b3StartRecordingIntoBuffer( b3World* world, b3Recording* recording );
 void b3StopRecordingInternal( b3World* world );
@@ -380,6 +396,7 @@ void b3StopRecordingInternal( b3World* world );
 // Fold one step's world bounds into the running union.
 void b3RecAccumulateBounds( b3Recording* rec, b3AABB bounds );
 
-// Deterministic hash over all body transforms and velocities.
-// Called by both recorder and replayer to verify simulation reproduces exactly.
+// Separate hashes keep persistent simulation state and transient contact events independently verifiable
 uint64_t b3HashWorldState( b3World* world );
+uint64_t b3HashContactEvents( const b3World* world );
+uint64_t b3HashBlockGridCounters( const b3World* world );

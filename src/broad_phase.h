@@ -61,7 +61,7 @@ void b3BroadPhase_BufferDynamicOverlaps( b3BroadPhase* bp, b3AABB aabb );
 
 int b3BroadPhase_GetShapeIndex( b3BroadPhase* bp, int proxyKey );
 
-void b3UpdateBroadPhasePairs( b3World* world );
+void b3UpdateBroadPhasePairs( b3World* world, bool createBlockGridPairs );
 bool b3BroadPhase_TestOverlap( const b3BroadPhase* bp, int proxyKeyA, int proxyKeyB );
 
 void b3ValidateBroadPhase( const b3BroadPhase* bp );
