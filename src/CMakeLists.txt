@@ -186,7 +186,14 @@ if (BOX3D_PROFILE)
 	FetchContent_MakeAvailable(tracy)
 
 	target_link_libraries(box3d PUBLIC TracyClient)
-
+	set(BOX3D_PROFILE_CALLSTACK_DEPTH "0" CACHE STRING "Tracy call-stack depth (0 disables zone call stacks)")
+	if(NOT BOX3D_PROFILE_CALLSTACK_DEPTH MATCHES "^[0-9]+$" OR BOX3D_PROFILE_CALLSTACK_DEPTH GREATER 62)
+		message(FATAL_ERROR "BOX3D_PROFILE_CALLSTACK_DEPTH must be an integer from 0 to 62")
+	endif()
+	target_compile_definitions(box3d PUBLIC TRACY_CALLSTACK=${BOX3D_PROFILE_CALLSTACK_DEPTH})
+	if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+		target_compile_options(box3d PUBLIC -fno-omit-frame-pointer)
+	endif()
 endif()
 
 if(BOX3D_VALIDATE)

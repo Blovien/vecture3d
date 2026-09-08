@@ -105,6 +105,21 @@
         "BOX3D_BENCHMARKS": "OFF",
         "BOX3D_UNIT_TESTS": "ON"
       }
+    },
+    {
+      "name": "v3-tracy",
+      "displayName": "Native library with Tracy call stacks",
+      "inherits": "v3-release",
+      "binaryDir": "${sourceDir}/build/v3-tracy",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "BOX3D_PROFILE": "ON",
+        "BOX3D_PROFILE_CALLSTACK_DEPTH": "16",
+        "BOX3D_SAMPLES": "OFF",
+        "BOX3D_UNIT_TESTS": "OFF",
+        "TRACY_ONLY_LOCALHOST": "ON",
+        "TRACY_ON_DEMAND": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -120,7 +135,8 @@
     { "name": "windows-clang-cl-release", "configurePreset": "windows-clang-cl", "configuration": "Release" },
     { "name": "clang-cl-debug",   "configurePreset": "clang-cl-debug" },
     { "name": "clang-cl-release", "configurePreset": "clang-cl-release" },
-    { "name": "v3-release", "configurePreset": "v3-release" }
+    { "name": "v3-release", "configurePreset": "v3-release" },
+    { "name": "v3-tracy", "configurePreset": "v3-tracy", "targets": ["box3d"] }
   ],
   "testPresets": [{"name": "v3-release", "configurePreset": "v3-release", "output": {"outputOnFailure": true}}]
 }
