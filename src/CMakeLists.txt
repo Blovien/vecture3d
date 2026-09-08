@@ -10,6 +10,21 @@ set(BOX3D_SOURCE_FILES
 	bitset.h
 	block_allocator.c
 	block_allocator.h
+	v3_block_grid.c
+	v3_block_grid_cook.c
+	v3_block_grid.h
+	v3_block_grid_internal.h
+	v3_block_grid_public.c
+	v3_block_grid_query.c
+	v3_interval.h
+	v3_obb_interval_sat.c
+	v3_obb_interval_sat.h
+	v3_separation_certifier.c
+	v3_separation_certifier.h
+	v3_sweep_interval.c
+	v3_sweep_interval.h
+	v3_witness_point.c
+	v3_witness_point.h
 	body.c
 	body.h
 	broad_phase.c
@@ -104,12 +119,16 @@ set(BOX3D_INCLUDE_FILES
 	../include/box3d/types.h
 )
 
+set(VECTURE3D_INCLUDE_FILES
+	../include/vecture3d/block_grid.h
+)
+
 # Hide internal functions
 # https://gcc.gnu.org/wiki/Visibility
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
 
-add_library(box3d ${BOX3D_SOURCE_FILES} ${BOX3D_INCLUDE_FILES})
+add_library(box3d ${BOX3D_SOURCE_FILES} ${BOX3D_INCLUDE_FILES} ${VECTURE3D_INCLUDE_FILES})
 
 # target_link_libraries(box3d PRIVATE eastl)
 
@@ -153,6 +172,7 @@ if (BOX3D_PROFILE)
 	FetchContent_MakeAvailable(tracy)
 
 	target_link_libraries(box3d PUBLIC TracyClient)
+
 endif()
 
 if(BOX3D_VALIDATE)
@@ -218,6 +238,7 @@ endif()
 
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" PREFIX "src" FILES ${BOX3D_SOURCE_FILES})
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/../include" PREFIX "include" FILES ${BOX3D_INCLUDE_FILES})
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/../include" PREFIX "include" FILES ${VECTURE3D_INCLUDE_FILES})
 
 add_library(box3d::box3d ALIAS box3d)
 
@@ -243,6 +264,11 @@ install(
 install(
   FILES ${BOX3D_INCLUDE_FILES}
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/box3d
+)
+
+install(
+  FILES ${VECTURE3D_INCLUDE_FILES}
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/vecture3d
 )
 
 include(CMakePackageConfigHelpers)

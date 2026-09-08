@@ -59,4 +59,16 @@ target_link_libraries(box3d_test PRIVATE box3d shared)
 
 add_test(NAME box3d COMMAND box3d_test)
 
+add_executable(v3_block_grid_cook_contract_c test_v3_block_grid_cook_contract.c)
+set_target_properties(v3_block_grid_cook_contract_c PROPERTIES C_STANDARD 17 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_include_directories(v3_block_grid_cook_contract_c PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(v3_block_grid_cook_contract_c PRIVATE box3d)
+add_test(NAME v3_block_grid_cook_contract_c COMMAND v3_block_grid_cook_contract_c)
+
+find_package(Threads REQUIRED)
+add_executable(v3_block_grid_cook_contract_cpp test_v3_block_grid_cook_contract.cpp)
+set_target_properties(v3_block_grid_cook_contract_cpp PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES CXX_EXTENSIONS NO)
+target_link_libraries(v3_block_grid_cook_contract_cpp PRIVATE box3d Threads::Threads)
+add_test(NAME v3_block_grid_cook_contract_cpp COMMAND v3_block_grid_cook_contract_cpp)
+
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" PREFIX "" FILES ${BOX3D_TEST_FILES})

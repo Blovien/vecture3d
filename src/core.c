@@ -16,6 +16,7 @@
 #include "box3d/constants.h"
 #include "box3d/math_functions.h"
 
+#include <limits.h>
 #include <stdarg.h>
 #include <string.h>
 
@@ -139,6 +140,52 @@ void b3SetAllocator( b3AllocFcn* allocFcn, b3FreeFcn* freeFcn )
 	b3_freeFcn = freeFcn;
 }
 
+void* b3TryAlloc( size_t size )
+{
+	if ( size == 0 )
+	{
+		return NULL;
+	}
+
+	if ( size > (size_t)INT_MAX - ( B3_ALIGNMENT - 1 ) )
+	{
+		return NULL;
+	}
+
+	int alignedSize = (int)( ( size + B3_ALIGNMENT - 1 ) & ~(size_t)( B3_ALIGNMENT - 1 ) );
+	void* ptr = NULL;
+
+	if ( b3_allocFcn != NULL )
+	{
+		ptr = b3_allocFcn( alignedSize, B3_ALIGNMENT );
+	}
+	else
+	{
+#ifdef B3_PLATFORM_WINDOWS
+		ptr = _aligned_malloc( alignedSize, B3_ALIGNMENT );
+#elif defined( B3_PLATFORM_ANDROID )
+		if ( posix_memalign( &ptr, B3_ALIGNMENT, alignedSize ) != 0 )
+		{
+			ptr = NULL;
+		}
+#else
+		ptr = aligned_alloc( B3_ALIGNMENT, alignedSize );
+#endif
+	}
+
+	if ( ptr == NULL )
+	{
+		return NULL;
+	}
+
+	b3TracyCAlloc( ptr, size );
+	b3AtomicFetchAddInt( &b3_byteCount, (int)size );
+
+	B3_ASSERT( ( (uintptr_t)ptr & ( B3_ALIGNMENT - 1 ) ) == 0 );
+
+	return ptr;
+}
+
 void* b3Alloc( size_t size )
 {
 	if ( size == 0 )
@@ -146,42 +193,12 @@ void* b3Alloc( size_t size )
 		return NULL;
 	}
 
-	// This could cause some sharing issues, however Box3D rarely calls b3Alloc.
-	// todo this is not true, Box3D allocates a lot.
-	b3AtomicFetchAddInt( &b3_byteCount, (int)size );
-
-	// Allocation must be a multiple of B3_ALIGNMENT (required by spec).
-	// https://en.cppreference.com/w/c/memory/aligned_alloc
-	int alignedSize = ( ( (int)size - 1 ) | ( B3_ALIGNMENT - 1 ) ) + 1;
-
-	if ( b3_allocFcn != NULL )
+	void* ptr = b3TryAlloc( size );
+	if ( ptr == NULL )
 	{
-		void* ptr = b3_allocFcn( alignedSize, B3_ALIGNMENT );
-		b3TracyCAlloc( ptr, size );
-
-		B3_ASSERT( ptr != NULL );
-		B3_ASSERT( ( (uintptr_t)ptr & ( B3_ALIGNMENT - 1 ) ) == 0 );
-
-		return ptr;
-	}
-
-#ifdef B3_PLATFORM_WINDOWS
-	void* ptr = _aligned_malloc( alignedSize, B3_ALIGNMENT );
-#elif defined( B3_PLATFORM_ANDROID )
-	void* ptr = NULL;
-	if ( posix_memalign( &ptr, B3_ALIGNMENT, alignedSize ) != 0 )
-	{
-		// allocation failed, exit the application
+		B3_ASSERT( false );
 		exit( EXIT_FAILURE );
 	}
-#else
-	void* ptr = aligned_alloc( B3_ALIGNMENT, alignedSize );
-#endif
-
-	b3TracyCAlloc( ptr, size );
-
-	B3_ASSERT( ptr != NULL );
-	B3_ASSERT( ( (uintptr_t)ptr & ( B3_ALIGNMENT - 1 ) ) == 0 );
 
 	return ptr;
 }
@@ -231,7 +248,10 @@ int b3GetByteCount( void )
 void* b3AllocZeroed( size_t size )
 {
 	void* mem = b3Alloc( size );
-	memset( mem, 0, size );
+	if ( size > 0 )
+	{
+		memset( mem, 0, size );
+	}
 	return mem;
 }
 

@@ -205,7 +205,8 @@ static b3SeparatingAxis b3QueryEdgeDirectionHullAndCapsule( const b3HullData* hu
 
 // Reduce the manifold points to a maximum of 4 points.
 // Note: this modifies the input point array to improve performance
-static void b3ReduceManifoldPoints( b3LocalManifold* manifold, int capacity, b3LocalManifoldPoint* points, int count )
+static void b3ReduceManifoldPoints( b3LocalManifold* manifold, int capacity, b3LocalManifoldPoint* points, int count,
+									float admissionDistance )
 {
 	if ( capacity < 4 )
 	{
@@ -225,8 +226,7 @@ static void b3ReduceManifoldPoints( b3LocalManifold* manifold, int capacity, b3L
 
 	b3Vec3 normal = manifold->normal;
 	// float linearSlop = B3_LINEAR_SLOP;
-	float speculativeDistance = B3_SPECULATIVE_DISTANCE;
-	float tolSqr = speculativeDistance * speculativeDistance;
+	float tolSqr = B3_SPECULATIVE_DISTANCE * B3_SPECULATIVE_DISTANCE;
 
 	// This bias is very important for contact point consistency across time steps.
 	// It creates a pecking order to avoid flickering between candidates with similar scores.
@@ -245,7 +245,7 @@ static void b3ReduceManifoldPoints( b3LocalManifold* manifold, int capacity, b3L
 	{
 		b3LocalManifoldPoint* pt = points + index;
 
-		if ( pt->separation > speculativeDistance )
+		if ( pt->separation > admissionDistance )
 		{
 			continue;
 		}
@@ -981,8 +981,10 @@ static int b3BuildPolygon( b3ClipVertex* out, b3Transform transform, const b3Hul
 	return outCount;
 }
 
-static bool b3BuildFaceAContact( b3LocalManifold* manifold, int capacity, const b3HullData* hullA, const b3HullData* hullB,
-								 b3Transform transformBtoA, b3SeparatingAxis query, b3SATCache* cache )
+static bool b3BuildFaceAContactWithFootprint( b3LocalManifold* manifold, int capacity, b3LocalManifold* footprint,
+											  int footprintCapacity, const b3HullData* hullA, const b3HullData* hullB,
+											  b3Transform transformBtoA, b3SeparatingAxis query, b3SATCache* cache,
+											  float speculativeDistance )
 {
 	B3_VALIDATE( query.type == b3_faceAxisA );
 	B3_VALIDATE( 0 <= query.indexA && query.indexA < hullA->faceCount );
@@ -1031,6 +1033,10 @@ static bool b3BuildFaceAContact( b3LocalManifold* manifold, int capacity, const 
 
 		if ( pointCount < 3 )
 		{
+			if ( footprint != NULL )
+			{
+				footprint->pointCount = 0;
+			}
 			*cache = (b3SATCache){ 0 };
 			return false;
 		}
@@ -1065,13 +1071,29 @@ static bool b3BuildFaceAContact( b3LocalManifold* manifold, int capacity, const 
 		minSeparation = b3MinFloat( minSeparation, clipPoint->separation );
 	}
 
-	if ( minSeparation >= B3_SPECULATIVE_DISTANCE )
+	if ( minSeparation >= speculativeDistance )
 	{
+		if ( footprint != NULL )
+		{
+			footprint->pointCount = 0;
+		}
 		*cache = (b3SATCache){ 0 };
 		return false;
 	}
+	if ( footprint != NULL )
+	{
+		if ( footprint->points == NULL || footprintCapacity < pointCount )
+		{
+			footprint->pointCount = 0;
+			*cache = (b3SATCache){ 0 };
+			return false;
+		}
+		footprint->normal = refPlane.normal;
+		footprint->pointCount = pointCount;
+		memcpy( footprint->points, points, (size_t)pointCount * sizeof( points[0] ) );
+	}
 
-	b3ReduceManifoldPoints( manifold, capacity, points, pointCount );
+	b3ReduceManifoldPoints( manifold, capacity, points, pointCount, speculativeDistance );
 
 	// Save cache
 	cache->separation = minSeparation;
@@ -1082,8 +1104,17 @@ static bool b3BuildFaceAContact( b3LocalManifold* manifold, int capacity, const 
 	return true;
 }
 
-static bool b3BuildFaceBContact( b3LocalManifold* manifold, int capacity, const b3HullData* hullA, const b3HullData* hullB,
+static bool b3BuildFaceAContact( b3LocalManifold* manifold, int capacity, const b3HullData* hullA, const b3HullData* hullB,
 								 b3Transform transformBtoA, b3SeparatingAxis query, b3SATCache* cache )
+{
+	return b3BuildFaceAContactWithFootprint( manifold, capacity, NULL, 0, hullA, hullB, transformBtoA, query, cache,
+											 B3_SPECULATIVE_DISTANCE );
+}
+
+static bool b3BuildFaceBContactWithFootprint( b3LocalManifold* manifold, int capacity, b3LocalManifold* footprint,
+											  int footprintCapacity, const b3HullData* hullA, const b3HullData* hullB,
+											  b3Transform transformBtoA, b3SeparatingAxis query, b3SATCache* cache,
+											  float speculativeDistance )
 {
 	B3_VALIDATE( query.type == b3_faceAxisB );
 
@@ -1096,7 +1127,8 @@ static bool b3BuildFaceBContact( b3LocalManifold* manifold, int capacity, const 
 		.type = b3_faceAxisA,
 	};
 
-	bool touching = b3BuildFaceAContact( manifold, capacity, hullB, hullA, transformAtoB, flippedQuery, cache );
+	bool touching = b3BuildFaceAContactWithFootprint( manifold, capacity, footprint, footprintCapacity, hullB, hullA,
+													  transformAtoB, flippedQuery, cache, speculativeDistance );
 	if ( touching == false )
 	{
 		*cache = (b3SATCache){ 0 };
@@ -1117,12 +1149,29 @@ static bool b3BuildFaceBContact( b3LocalManifold* manifold, int capacity, const 
 		pt->point = b3Add( b3MulMV( matrix, pt->point ), transformBtoA.p );
 		pt->pair = b3FlipPair( pt->pair );
 	}
+	if ( footprint != NULL )
+	{
+		footprint->normal = manifold->normal;
+		for ( int i = 0; i < footprint->pointCount; ++i )
+		{
+			b3LocalManifoldPoint* pt = footprint->points + i;
+			pt->point = b3Add( b3MulMV( matrix, pt->point ), transformBtoA.p );
+			pt->pair = b3FlipPair( pt->pair );
+		}
+	}
 
 	cache->type = (uint8_t)b3_faceAxisB;
 	cache->indexA = (uint8_t)query.indexA;
 	cache->indexB = (uint8_t)query.indexB;
 
 	return true;
+}
+
+static bool b3BuildFaceBContact( b3LocalManifold* manifold, int capacity, const b3HullData* hullA, const b3HullData* hullB,
+								 b3Transform transformBtoA, b3SeparatingAxis query, b3SATCache* cache )
+{
+	return b3BuildFaceBContactWithFootprint( manifold, capacity, NULL, 0, hullA, hullB, transformBtoA, query, cache,
+											 B3_SPECULATIVE_DISTANCE );
 }
 
 static bool b3BuildEdgeContact( b3LocalManifold* manifold, const b3HullData* hullA, const b3HullData* hullB,
@@ -1182,6 +1231,262 @@ static bool b3BuildEdgeContact( b3LocalManifold* manifold, const b3HullData* hul
 	cache->indexB = (uint8_t)query.indexB;
 
 	return true;
+}
+
+bool b3EvaluateHullFeature( b3SeparatingAxis* result, const b3HullData* hullA, const b3HullData* hullB, b3Transform transformBtoA,
+							const b3SATCache* feature )
+{
+	if ( result == NULL || hullA == NULL || hullB == NULL || feature == NULL || b3IsValidTransform( transformBtoA ) == false )
+	{
+		return false;
+	}
+
+	const b3Plane* planesA = b3GetHullPlanes( hullA );
+	const b3Plane* planesB = b3GetHullPlanes( hullB );
+	const b3Vec3* pointsA = b3GetHullPoints( hullA );
+	const b3Vec3* pointsB = b3GetHullPoints( hullB );
+
+	if ( feature->type == b3_faceAxisA )
+	{
+		if ( feature->indexA >= hullA->faceCount )
+		{
+			return false;
+		}
+
+		b3Plane plane = planesA[feature->indexA];
+		b3Vec3 searchDirection = b3Neg( b3InvRotateVector( transformBtoA.q, plane.normal ) );
+		int vertexIndex = b3FindHullSupportVertex( hullB, searchDirection );
+		b3Vec3 support = b3TransformPoint( transformBtoA, pointsB[vertexIndex] );
+		*result = (b3SeparatingAxis){
+			.normal = plane.normal,
+			.separation = b3PlaneSeparation( plane, support ),
+			.indexA = feature->indexA,
+			.indexB = vertexIndex,
+			.type = b3_faceAxisA,
+		};
+		return true;
+	}
+
+	if ( feature->type == b3_faceAxisB )
+	{
+		if ( feature->indexB >= hullB->faceCount )
+		{
+			return false;
+		}
+
+		b3Plane plane = planesB[feature->indexB];
+		b3Vec3 normal = b3Neg( b3RotateVector( transformBtoA.q, plane.normal ) );
+		int vertexIndex = b3FindHullSupportVertex( hullA, normal );
+		b3Vec3 support = b3InvTransformPoint( transformBtoA, pointsA[vertexIndex] );
+		*result = (b3SeparatingAxis){
+			.normal = normal,
+			.separation = b3PlaneSeparation( plane, support ),
+			.indexA = vertexIndex,
+			.indexB = feature->indexB,
+			.type = b3_faceAxisB,
+		};
+		return true;
+	}
+
+	if ( feature->type != b3_edgePairAxis || feature->indexA >= hullA->edgeCount || feature->indexB >= hullB->edgeCount )
+	{
+		return false;
+	}
+
+	const b3HullHalfEdge* edgesA = b3GetHullEdges( hullA );
+	const b3HullHalfEdge* edgesB = b3GetHullEdges( hullB );
+	const b3HullHalfEdge* edgeA = edgesA + feature->indexA;
+	const b3HullHalfEdge* twinA = edgesA + edgeA->twin;
+	const b3HullHalfEdge* edgeB = edgesB + feature->indexB;
+	const b3HullHalfEdge* twinB = edgesB + edgeB->twin;
+
+	b3Vec3 pA = pointsA[edgeA->origin];
+	b3Vec3 qA = pointsA[twinA->origin];
+	b3Vec3 directionA = b3Sub( qA, pA );
+	b3Vec3 normalA0 = planesA[edgeA->face].normal;
+	b3Vec3 normalA1 = planesA[twinA->face].normal;
+
+	b3Vec3 pB = b3TransformPoint( transformBtoA, pointsB[edgeB->origin] );
+	b3Vec3 qB = b3TransformPoint( transformBtoA, pointsB[twinB->origin] );
+	b3Vec3 directionB = b3Sub( qB, pB );
+	b3Vec3 normalB0 = b3RotateVector( transformBtoA.q, planesB[edgeB->face].normal );
+	b3Vec3 normalB1 = b3RotateVector( transformBtoA.q, planesB[twinB->face].normal );
+
+	float cba = b3Dot( normalB0, directionA );
+	float dba = b3Dot( normalB1, directionA );
+	float adc = -b3Dot( normalA0, directionB );
+	float bdc = -b3Dot( normalA1, directionB );
+	if ( cba * dba >= 0.0f || adc * bdc >= 0.0f || cba * bdc <= 0.0f )
+	{
+		return false;
+	}
+
+	float squaredTolerance = B3_PARALLEL_EDGE_TOL * B3_PARALLEL_EDGE_TOL;
+	if ( b3MaxFloat( cba * cba, dba * dba ) < squaredTolerance * b3LengthSquared( directionA ) )
+	{
+		return false;
+	}
+
+	float fraction = cba / ( cba - dba );
+	b3Vec3 axis = b3Normalize( b3Lerp( normalB0, normalB1, fraction ) );
+	*result = (b3SeparatingAxis){
+		.normal = b3Neg( axis ),
+		.separation = b3Dot( axis, b3Sub( qA, qB ) ),
+		.indexA = feature->indexA,
+		.indexB = feature->indexB,
+		.type = b3_edgePairAxis,
+	};
+	return true;
+}
+
+bool b3BuildHullManifoldForAxis( b3LocalManifold* manifold, int capacity, const b3HullData* hullA, const b3HullData* hullB,
+								 b3Transform transformBtoA, b3SeparatingAxis axis, b3SATCache* result )
+{
+	if ( manifold == NULL || hullA == NULL || hullB == NULL || result == NULL || capacity < 4 ||
+		 b3IsValidTransform( transformBtoA ) == false )
+	{
+		return false;
+	}
+
+	manifold->pointCount = 0;
+	*result = (b3SATCache){ 0 };
+	if ( axis.type == b3_faceAxisA )
+	{
+		return b3BuildFaceAContact( manifold, capacity, hullA, hullB, transformBtoA, axis, result );
+	}
+	if ( axis.type == b3_faceAxisB )
+	{
+		return b3BuildFaceBContact( manifold, capacity, hullA, hullB, transformBtoA, axis, result );
+	}
+	if ( axis.type == b3_edgePairAxis )
+	{
+		return b3BuildEdgeContact( manifold, hullA, hullB, transformBtoA, axis, result );
+	}
+	return false;
+}
+
+bool b3BuildHullManifoldForAxisWithFootprint( b3LocalManifold* manifold, int capacity, b3LocalManifold* footprint,
+											  int footprintCapacity, const b3HullData* hullA, const b3HullData* hullB,
+											  b3Transform transformBtoA, b3SeparatingAxis axis, b3SATCache* result,
+											  float speculativeDistance )
+{
+	if ( manifold == NULL || footprint == NULL || footprint->points == NULL || hullA == NULL || hullB == NULL || result == NULL ||
+		 capacity < 4 || footprintCapacity <= 0 || b3IsValidTransform( transformBtoA ) == false )
+	{
+		return false;
+	}
+
+	manifold->pointCount = 0;
+	footprint->pointCount = 0;
+	*result = (b3SATCache){ 0 };
+	if ( axis.type == b3_faceAxisA )
+	{
+		return b3BuildFaceAContactWithFootprint( manifold, capacity, footprint, footprintCapacity, hullA, hullB, transformBtoA,
+												 axis, result, speculativeDistance );
+	}
+	if ( axis.type == b3_faceAxisB )
+	{
+		return b3BuildFaceBContactWithFootprint( manifold, capacity, footprint, footprintCapacity, hullA, hullB, transformBtoA,
+												 axis, result, speculativeDistance );
+	}
+	if ( axis.type == b3_edgePairAxis && b3BuildEdgeContact( manifold, hullA, hullB, transformBtoA, axis, result ) )
+	{
+		footprint->normal = manifold->normal;
+		footprint->pointCount = 1;
+		footprint->points[0] = manifold->points[0];
+		return true;
+	}
+	return false;
+}
+
+static bool b3BuildHullManifoldFromQueryInternal( b3LocalManifold* manifold, int capacity, b3LocalManifold* footprint,
+												  int footprintCapacity, const b3HullData* hullA, const b3HullData* hullB,
+												  b3Transform transformBtoA, const b3AxisQuery* query, b3SATCache* result,
+												  float speculativeDistance )
+{
+	if ( manifold == NULL || hullA == NULL || hullB == NULL || query == NULL || result == NULL || capacity < 4 ||
+		 ( footprint != NULL && ( footprint->points == NULL || footprintCapacity <= 0 ) ) ||
+		 b3IsValidTransform( transformBtoA ) == false )
+	{
+		return false;
+	}
+
+	manifold->pointCount = 0;
+	if ( footprint != NULL )
+	{
+		footprint->pointCount = 0;
+	}
+	*result = (b3SATCache){ 0 };
+	if ( b3GetBestAxis( query ).separation > speculativeDistance )
+	{
+		return false;
+	}
+
+	if ( query->faceA.separation > query->faceB.separation )
+	{
+		B3_VALIDATE( 0 <= query->faceA.indexA && query->faceA.indexA < hullA->faceCount );
+		B3_VALIDATE( 0 <= query->faceA.indexB && query->faceA.indexB < hullB->vertexCount );
+		b3BuildFaceAContactWithFootprint( manifold, capacity, footprint, footprintCapacity, hullA, hullB, transformBtoA,
+										  query->faceA, result, speculativeDistance );
+		B3_VALIDATE( result->indexA < hullA->faceCount );
+		B3_VALIDATE( result->indexB < hullB->vertexCount );
+	}
+	else
+	{
+		B3_VALIDATE( 0 <= query->faceB.indexA && query->faceB.indexA < hullA->vertexCount );
+		B3_VALIDATE( 0 <= query->faceB.indexB && query->faceB.indexB < hullB->faceCount );
+		b3BuildFaceBContactWithFootprint( manifold, capacity, footprint, footprintCapacity, hullA, hullB, transformBtoA,
+										  query->faceB, result, speculativeDistance );
+		B3_VALIDATE( result->indexA < hullA->vertexCount );
+		B3_VALIDATE( result->indexB < hullB->faceCount );
+	}
+
+	if ( query->edge.indexA == B3_NULL_INDEX )
+	{
+		return manifold->pointCount > 0;
+	}
+
+	float clipSeparation = result->separation;
+	if ( manifold->pointCount == 0 || query->edge.separation > clipSeparation + B3_LINEAR_SLOP )
+	{
+		B3_ASSERT( 0 <= query->edge.indexA && query->edge.indexA < hullA->edgeCount );
+		B3_ASSERT( 0 <= query->edge.indexB && query->edge.indexB < hullB->edgeCount );
+		b3LocalManifoldPoint edgePoint = { 0 };
+		b3LocalManifold edgeManifold = { .points = &edgePoint };
+		b3SATCache edgeCache = { 0 };
+		if ( b3BuildEdgeContact( &edgeManifold, hullA, hullB, transformBtoA, query->edge, &edgeCache ) )
+		{
+			b3LocalManifoldPoint* points = manifold->points;
+			*manifold = edgeManifold;
+			manifold->points = points;
+			manifold->points[0] = edgePoint;
+			*result = edgeCache;
+			if ( footprint != NULL )
+			{
+				footprint->normal = manifold->normal;
+				footprint->pointCount = 1;
+				footprint->points[0] = edgePoint;
+			}
+		}
+	}
+
+	return manifold->pointCount > 0;
+}
+
+bool b3BuildHullManifoldFromQuery( b3LocalManifold* manifold, int capacity, const b3HullData* hullA, const b3HullData* hullB,
+								   b3Transform transformBtoA, const b3AxisQuery* query, b3SATCache* result )
+{
+	return b3BuildHullManifoldFromQueryInternal( manifold, capacity, NULL, 0, hullA, hullB, transformBtoA, query, result,
+												 B3_SPECULATIVE_DISTANCE );
+}
+
+bool b3BuildHullManifoldFromQueryWithFootprint( b3LocalManifold* manifold, int capacity, b3LocalManifold* footprint,
+												int footprintCapacity, const b3HullData* hullA, const b3HullData* hullB,
+												b3Transform transformBtoA, const b3AxisQuery* query, b3SATCache* result,
+												float speculativeDistance )
+{
+	return b3BuildHullManifoldFromQueryInternal( manifold, capacity, footprint, footprintCapacity, hullA, hullB, transformBtoA,
+												 query, result, speculativeDistance );
 }
 
 // Transform a SoA point/normal stream (already split into X/Y/Z) by out = -(R*v (+t)).
@@ -2028,70 +2333,7 @@ void b3CollideHulls( b3LocalManifold* manifold, int capacity, const b3HullData* 
 
 	B3_VALIDATE( axisQuery.faceA.separation <= speculativeDistance || axisQuery.faceB.separation <= speculativeDistance ||
 				 axisQuery.edge.separation <= speculativeDistance );
-
-	if ( axisQuery.faceA.separation > axisQuery.faceB.separation )
-	{
-		b3SeparatingAxis faceQuery = axisQuery.faceA;
-		B3_VALIDATE( 0 <= faceQuery.indexA && faceQuery.indexA < hullA->faceCount );
-		B3_VALIDATE( 0 <= faceQuery.indexB && faceQuery.indexB < hullB->vertexCount );
-
-		// Face contact A
-		b3BuildFaceAContact( manifold, capacity, hullA, hullB, transformBtoA, faceQuery, cache );
-
-		B3_VALIDATE( cache->indexA < hullA->faceCount );
-		B3_VALIDATE( cache->indexB < hullB->vertexCount );
-	}
-	else
-	{
-		b3SeparatingAxis faceQuery = axisQuery.faceB;
-		B3_VALIDATE( 0 <= faceQuery.indexA && faceQuery.indexA < hullA->vertexCount );
-		B3_VALIDATE( 0 <= faceQuery.indexB && faceQuery.indexB < hullB->faceCount );
-
-		// Face contact B
-		b3BuildFaceBContact( manifold, capacity, hullA, hullB, transformBtoA, faceQuery, cache );
-
-		B3_VALIDATE( cache->indexA < hullA->vertexCount );
-		B3_VALIDATE( cache->indexB < hullB->faceCount );
-	}
-
-	b3SeparatingAxis edgeQuery = axisQuery.edge;
-
-	if ( edgeQuery.indexA == B3_NULL_INDEX )
-	{
-		// There are no valid edge pairs (all edges parallel)
-		return;
-	}
-
-	float clipSeparation = cache->separation;
-	float edgeTol = linearSlop;
-
-	// Face contact can be empty if it does not realize the axis of minimum penetration.
-	// Create edge contact if face contact fails or edge contact is significantly better!
-	if ( manifold->pointCount == 0 || edgeQuery.separation > clipSeparation + edgeTol )
-	{
-		B3_ASSERT( 0 <= edgeQuery.indexA && edgeQuery.indexA < hullA->edgeCount );
-		B3_ASSERT( 0 <= edgeQuery.indexB && edgeQuery.indexB < hullB->edgeCount );
-
-		// Edge contact
-		b3LocalManifold edgeManifold = { 0 };
-		b3LocalManifoldPoint edgePoint = { 0 };
-		edgeManifold.points = &edgePoint;
-
-		b3SATCache edgeCache = { 0 };
-		b3BuildEdgeContact( &edgeManifold, hullA, hullB, transformBtoA, edgeQuery, &edgeCache );
-
-		// It is possible with speculation to have vertex-vertex collision that is missed by SAT,
-		// so edge contact yields no points. In that case perhaps the face contact has some points.
-		if ( edgeManifold.pointCount == 1 )
-		{
-			// Copy edge manifold out, being careful to preserve manifold point buffer.
-			b3LocalManifoldPoint* points = manifold->points;
-			*manifold = edgeManifold;
-			manifold->points = points;
-			manifold->points[0] = edgePoint;
-			*cache = edgeCache;
-		}
-	}
+	b3BuildHullManifoldFromQuery( manifold, capacity, hullA, hullB, transformBtoA, &axisQuery, cache );
 }
 
 #else
