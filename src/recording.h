@@ -49,8 +49,8 @@ typedef struct b3World b3World;
 #define B3_REC_MAGIC 0x43523342u
 
 // Major recording version is bumped when writers change.
-// Major version 15 preserves BlockGrid contact capacities while retaining legacy voxel shapes.
-#define B3_REC_VERSION_MAJOR 15
+// Major version 16 preserves retained BlockGrid contact and transition capacities.
+#define B3_REC_VERSION_MAJOR 16
 
 // Minor tracks additive operations whose absence does not change simulation
 #define B3_REC_VERSION_MINOR 0

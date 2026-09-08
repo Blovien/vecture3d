@@ -54,14 +54,23 @@ static int test_world_allocation_failure_does_not_publish_world( void )
 {
 	uint32_t baseline = v3_active_world_count_internal();
 	v3_test_fail_after( V3_TEST_FAULT_WORLD_CALLOC, 0 );
-	ENSURE( v3_world_create_internal( 0.0, -9.81, 0.0 ) == NULL );
+	ENSURE( v3_world_create_internal( 0.0, -9.81, 0.0, NULL ) == NULL );
+	ENSURE( v3_active_world_count_internal() == baseline );
+	return 0;
+}
+
+static int test_block_contact_storage_failure_does_not_publish_world( void )
+{
+	uint32_t baseline = v3_active_world_count_internal();
+	v3_test_fail_after( V3_TEST_FAULT_BLOCK_CONTACT_STORAGE_CALLOC, 0 );
+	ENSURE( v3_world_create_internal( 0.0, -9.81, 0.0, NULL ) == NULL );
 	ENSURE( v3_active_world_count_internal() == baseline );
 	return 0;
 }
 
 static int test_entry_allocation_failure_does_not_publish_logical_id( void )
 {
-	v3_world* world = v3_world_create_internal( 0.0, -9.81, 0.0 );
+	v3_world* world = v3_world_create_internal( 0.0, -9.81, 0.0, NULL );
 	ENSURE( world != NULL );
 	v3_box_body_command command = make_static_box( UINT64_C( 60001 ), UINT32_C( 1 ) );
 
@@ -76,7 +85,7 @@ static int test_entry_allocation_failure_does_not_publish_logical_id( void )
 
 static int test_pending_allocation_failure_does_not_publish_logical_id( void )
 {
-	v3_world* world = v3_world_create_internal( 0.0, -9.81, 0.0 );
+	v3_world* world = v3_world_create_internal( 0.0, -9.81, 0.0, NULL );
 	ENSURE( world != NULL );
 	v3_box_body_command initial = make_static_box( UINT64_C( 61001 ), UINT32_C( 1 ) );
 	ENSURE( v3_world_replace_box_bodies_internal( world, NULL, 0, &initial, 1 ) == V3_OK );
@@ -104,7 +113,7 @@ static int test_pending_allocation_failure_does_not_publish_logical_id( void )
 
 static int test_body_creation_failure_rolls_back_pending_body( void )
 {
-	v3_world* world = v3_world_create_internal( 0.0, -9.81, 0.0 );
+	v3_world* world = v3_world_create_internal( 0.0, -9.81, 0.0, NULL );
 	ENSURE( world != NULL );
 	v3_box_body_command commands[2] = {
 		make_static_box( UINT64_C( 62001 ), UINT32_C( 1 ) ),
@@ -122,7 +131,7 @@ static int test_body_creation_failure_rolls_back_pending_body( void )
 
 static int test_shape_creation_failure_rolls_back_current_and_pending_bodies( void )
 {
-	v3_world* world = v3_world_create_internal( 0.0, -9.81, 0.0 );
+	v3_world* world = v3_world_create_internal( 0.0, -9.81, 0.0, NULL );
 	ENSURE( world != NULL );
 	v3_box_body_command commands[2] = {
 		make_static_box( UINT64_C( 63001 ), UINT32_C( 1 ) ),
@@ -140,7 +149,7 @@ static int test_shape_creation_failure_rolls_back_current_and_pending_bodies( vo
 
 static int test_mutation_counters_saturate_at_signed_maximum( void )
 {
-	v3_world* world = v3_world_create_internal( 0.0, -9.81, 0.0 );
+	v3_world* world = v3_world_create_internal( 0.0, -9.81, 0.0, NULL );
 	ENSURE( world != NULL );
 	world->mutation_batch_count = (uint32_t)INT32_MAX - 1u;
 	world->created_body_count = (uint32_t)INT32_MAX - 1u;
@@ -162,6 +171,7 @@ int main( void )
 {
 	uint32_t baseline = v3_active_world_count_internal();
 	ENSURE( test_world_allocation_failure_does_not_publish_world() == 0 );
+	ENSURE( test_block_contact_storage_failure_does_not_publish_world() == 0 );
 	ENSURE( test_entry_allocation_failure_does_not_publish_logical_id() == 0 );
 	ENSURE( test_pending_allocation_failure_does_not_publish_logical_id() == 0 );
 	ENSURE( test_body_creation_failure_rolls_back_pending_body() == 0 );

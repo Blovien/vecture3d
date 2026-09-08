@@ -6,15 +6,34 @@ public record V3QueryResult(
     long queryId,
     Status status,
     long hitLogicalId,
-    float fraction
+    float fraction,
+    double pointX,
+    double pointY,
+    double pointZ,
+    float normalX,
+    float normalY,
+    float normalZ,
+    boolean blockGrid,
+    int cellX,
+    int cellY,
+    int cellZ,
+    int cellBoxIndex,
+    int materialIndex,
+    long userMaterialId,
+    long userData
 ) {
+    public V3QueryResult(long queryId, Status status, long hitLogicalId, float fraction) {
+        this(queryId, status, hitLogicalId, fraction, 0.0, 0.0, 0.0, 0.0f, 0.0f, 0.0f, false, 0, 0, 0, 0, 0, 0L, 0L);
+    }
+
     public V3QueryResult {
         Objects.requireNonNull(status, "status");
         if (queryId == 0) {
             throw new IllegalArgumentException("queryId cannot be zero");
         }
-        if (!Float.isFinite(fraction)) {
-            throw new IllegalArgumentException("fraction must be finite");
+        if (!Float.isFinite(fraction) || !Double.isFinite(pointX) || !Double.isFinite(pointY) || !Double.isFinite(pointZ)
+            || !V3BoxBodyCommand.allFinite(normalX, normalY, normalZ)) {
+            throw new IllegalArgumentException("query result values must be finite");
         }
         switch (status) {
             case NO_HIT -> {
@@ -36,9 +55,7 @@ public record V3QueryResult(
     }
 
     public enum Status {
-        NO_HIT(0),
-        IMMEDIATE_BLOCK(1),
-        CAST_HIT(2);
+        NO_HIT(0), IMMEDIATE_BLOCK(1), CAST_HIT(2);
 
         private final int nativeValue;
 

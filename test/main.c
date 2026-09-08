@@ -59,7 +59,6 @@ extern int V3BlockGridMotionTest( void );
 extern int V3BlockGridEventsTest( void );
 extern int V3BlockGridCastsTest( void );
 extern int V3BlockGridEntryTest( void );
-extern int V3VoxelTest( void );
 extern int V3WorldLimitsTest( void );
 extern int WorldTest( void );
 
@@ -145,7 +144,6 @@ int main( int argc, char** argv )
 	MAYBE_RUN_TEST( V3BlockGridEventsTest );
 	MAYBE_RUN_TEST( V3BlockGridCastsTest );
 	MAYBE_RUN_TEST( V3BlockGridEntryTest );
-	MAYBE_RUN_TEST( V3VoxelTest );
 	MAYBE_RUN_TEST( V3WorldLimitsTest );
 	MAYBE_RUN_TEST( WorldTest );
 

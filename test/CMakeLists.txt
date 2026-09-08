@@ -36,7 +36,6 @@ set(BOX3D_TEST_FILES
     test_v3_block_grid_events.c
 	test_v3_block_grid_casts.c
     test_v3_block_grid_entry.c
-    test_v3_voxel.c
     test_v3_world_limits.c
     test_world.c
 )

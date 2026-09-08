@@ -138,7 +138,6 @@ static bool b3BufferDynamicOverlapCallback( int proxyId, uint64_t userData, void
 
 void b3BroadPhase_BufferDynamicOverlaps( b3BroadPhase* bp, b3AABB aabb )
 {
-	// A voxel shape cannot be the moved query shape because its child tree is descended from the other shape.
 	b3DynamicTree_Query( bp->trees + b3_dynamicBody, aabb, B3_DEFAULT_MASK_BITS, false, b3BufferDynamicOverlapCallback, bp );
 }
 
@@ -240,7 +239,7 @@ static bool b3PairQueryCallback( int proxyId, uint64_t userData, void* context )
 			childIndex = v3_blockGridPairChildIndex;
 			isBlockGridPair = true;
 		}
-		else if ( shape->type == b3_compoundShape || shape->type == b3_voxelShape )
+		else if ( shape->type == b3_compoundShape )
 		{
 			// Query bounds are float world space, so the demoted transform is the matching float frame
 			b3Transform compoundTransform = b3ToRelativeTransform( b3GetBodyTransform( world, shape->bodyId ), b3Pos_zero );
@@ -250,7 +249,7 @@ static bool b3PairQueryCallback( int proxyId, uint64_t userData, void* context )
 			queryContext->compoundShapeIndex = shapeIndex;
 			queryContext->compoundProxyId = proxyId;
 
-			const b3CompoundData* compound = shape->type == b3_compoundShape ? shape->compound : shape->voxel;
+			const b3CompoundData* compound = shape->compound;
 			b3DynamicTree_Query( &compound->tree, localAABB, B3_DEFAULT_MASK_BITS, false, b3PairQueryCallback, context );
 			queryContext->compoundShapeIndex = B3_NULL_INDEX;
 			queryContext->compoundProxyId = B3_NULL_INDEX;
@@ -420,8 +419,8 @@ static bool b3PairQueryCallback( int proxyId, uint64_t userData, void* context )
 	}
 	else
 	{
-		// Dense voxel sections can overlap far more than the stack estimate. Dropping these pairs would
-		// make collision depend on child ordering. For now we should we keep them compared to Box3D
+		// Dense overlaps can exceed the pair capacity. Keep every pair so collision
+		// does not depend on traversal order.
 		pair = (b3MovePair*)b3Alloc( sizeof( b3MovePair ) );
 		pair->heap = true;
 	}
@@ -471,14 +470,11 @@ static void b3FindPairsTask( int startIndex, int endIndex, int workerIndex, void
 		queryContext.queryShapeIndex = (int)b3DynamicTree_GetUserData( baseTree, proxyId );
 		queryContext.aabb = fatAABB;
 
-		// A pair key carries a single child index, so a moved container proxy
-		// would key one contact against child 0 alone. Compounds and voxels have
-		// no way to say which child, and they are static-only anyway, so they
-		// stay skipped. A grid moves, so it takes the reversed path instead:
-		// every shape the query finds gets the grid's overlapping hitboxes
-		// enumerated against it, one pair per hitbox.
+		// Compounds are static and cannot be query proxies. A moved grid keeps one
+		// pair with another grid. Against a convex shape, it enumerates its own
+		// hitboxes through the reversed query.
 		b3ShapeType queryShapeType = world->shapes.data[queryContext.queryShapeIndex].type;
-		if ( queryShapeType == b3_compoundShape || queryShapeType == b3_voxelShape )
+		if ( queryShapeType == b3_compoundShape )
 		{
 			B3_ASSERT( false );
 			continue;

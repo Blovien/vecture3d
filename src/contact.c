@@ -189,12 +189,9 @@ void b3InitializeContactRegisters( void )
 		b3AddType( b3_heightShape, b3_sphereShape );
 		b3AddType( b3_heightShape, b3_capsuleShape );
 		b3AddType( b3_heightShape, b3_hullShape );
-		b3AddType( b3_voxelShape, b3_sphereShape );
-		b3AddType( b3_voxelShape, b3_capsuleShape );
-		b3AddType( b3_voxelShape, b3_hullShape );
 
 		// The grid resolves a candidate hitbox into a box hull and runs the same
-		// convex manifold, so it registers precisely the voxel shape's pair set.
+		// convex manifold for sphere, capsule and hull contacts.
 		b3AddType( v3_blockGridShape, b3_sphereShape );
 		b3AddType( v3_blockGridShape, b3_capsuleShape );
 		b3AddType( v3_blockGridShape, b3_hullShape );
@@ -308,10 +305,9 @@ void b3CreateContact( b3World* world, b3Shape* shapeA, b3Shape* shapeB, int chil
 	{
 		contact->kind = b3_meshContactKind;
 	}
-	else if ( isBlockGridPair == false && ( shapeA->type == b3_compoundShape || shapeA->type == b3_voxelShape ) )
+	else if ( isBlockGridPair == false && shapeA->type == b3_compoundShape )
 	{
-		const b3CompoundData* compound = shapeA->type == b3_compoundShape ? shapeA->compound : shapeA->voxel;
-		b3ChildShape child = b3GetCompoundChild( compound, childIndex );
+		b3ChildShape child = b3GetCompoundChild( shapeA->compound, childIndex );
 		if ( child.type == b3_meshShape )
 		{
 			contact->kind = b3_meshContactKind;
@@ -1023,7 +1019,7 @@ b3ContactUpdateResult b3UpdateContact( b3World* world, int workerIndex, b3Contac
 
 	bool touching;
 
-	B3_ASSERT( shapeB->type != b3_compoundShape && shapeB->type != b3_voxelShape && shapeB->type != v3_blockGridShape );
+	B3_ASSERT( shapeB->type != b3_compoundShape && shapeB->type != v3_blockGridShape );
 
 	if ( shapeA->type == v3_blockGridShape )
 	{
@@ -1051,11 +1047,10 @@ b3ContactUpdateResult b3UpdateContact( b3World* world, int workerIndex, b3Contac
 		bool flip = false;
 		touching = b3UpdateConvexContact( world, workerIndex, contact, &childShapeA, xfA, shapeB, xfB, flip, arena );
 	}
-	else if ( shapeA->type == b3_compoundShape || shapeA->type == b3_voxelShape )
+	else if ( shapeA->type == b3_compoundShape )
 	{
 		int childIndex = contact->childIndex;
-		const b3CompoundData* compound = shapeA->type == b3_compoundShape ? shapeA->compound : shapeA->voxel;
-		b3ChildShape child = b3GetCompoundChild( compound, childIndex );
+		b3ChildShape child = b3GetCompoundChild( shapeA->compound, childIndex );
 
 		// Temporary child shape to match existing function signatures
 		b3Shape childShapeA;

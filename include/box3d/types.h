@@ -481,9 +481,6 @@ typedef enum b3ShapeType
 	/// A sphere with an offset
 	b3_sphereShape,
 
-	/// A static voxel shape backed by immutable convex children
-	b3_voxelShape,
-
 	/// A BlockGrid, which holds immutable blocks alongside their exact hitboxes
 	/// and indexes both through 4x4x4 Occupancy Groups. It sits on any body
 	/// type, and because its mass is integrated over the blocks rather than the
@@ -3075,7 +3072,6 @@ typedef struct b3DebugShape
 		const b3Capsule* capsule;			  ///< Capsule shape.
 		const b3CompoundData* compound;		  ///< Compound shape.
 		const b3HeightFieldData* heightField; ///< Height-field shape.
-		const b3CompoundData* voxel;			  ///< Voxel shape.
 		const b3HullData* hull;				  ///< Convex hull shape.
 		const b3Mesh* mesh;					  ///< Mesh shape with scale.
 		const b3Sphere* sphere;				  ///< Sphere shape.

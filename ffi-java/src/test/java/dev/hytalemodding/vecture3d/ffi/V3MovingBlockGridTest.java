@@ -7,9 +7,9 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-class V3MovingVoxelTest {
+class V3MovingBlockGridTest {
     @AfterEach
-    void movingVoxelWorldsReturnToTheNativeLifetimeBaseline() {
+    void movingBlockGridWorldsReturnToTheNativeLifetimeBaseline() {
         assertEquals(0, V3TestSupport.library().activeWorldCount());
     }
 
@@ -24,10 +24,6 @@ class V3MovingVoxelTest {
                 64.0,
                 -32.0
             );
-            List<V3TerrainBox> boxes = List.of(
-                V3TestSupport.terrainBox(7_201, 0.5f, 0.5f, 0.5f),
-                V3TestSupport.terrainBox(7_202, 2.5f, 0.5f, 0.5f)
-            );
             V3MassProperties mass = new V3MassProperties(
                 2.0f,
                 1.5f,
@@ -41,7 +37,9 @@ class V3MovingVoxelTest {
                 0.0f
             );
 
-            world.createVoxelGroup(body, boxes, mass);
+            try (V3CookedGrid grid = twoCells()) {
+                world.attachBlockGrid(V3TestSupport.bodyDefinition(body), grid, mass);
+            }
             V3Transform transform = V3TestSupport.transform(world.step(1, List.of(), List.of(), List.of()), 1_301);
 
             assertEquals(96.0, transform.positionX(), 0.0);
@@ -71,10 +69,6 @@ class V3MovingVoxelTest {
                 2.0f,
                 V3BoxBodyCommand.INITIAL_AWAKE_FLAG
             );
-            List<V3TerrainBox> boxes = List.of(
-                V3TestSupport.terrainBox(7_301, 0.5f, 0.5f, 0.5f),
-                V3TestSupport.terrainBox(7_302, 2.5f, 0.5f, 0.5f)
-            );
             V3MassProperties mass = new V3MassProperties(
                 2.0f,
                 1.5f,
@@ -88,7 +82,9 @@ class V3MovingVoxelTest {
                 0.0f
             );
 
-            world.createVoxelGroup(body, boxes, mass);
+            try (V3CookedGrid grid = twoCells()) {
+                world.attachBlockGrid(V3TestSupport.bodyDefinition(body), grid, mass);
+            }
             V3Transform transform = V3TestSupport.transform(world.step(0, List.of(), List.of(), List.of()), 1_401);
 
             assertEquals(-1.0f, transform.linearVelocityX(), 1.0e-5f);
@@ -109,11 +105,12 @@ class V3MovingVoxelTest {
                 8.0,
                 0.0
             );
-            world.createVoxelGroup(
-                body,
-                List.of(V3TestSupport.terrainBox(7_401, 0.5f, 0.5f, 0.5f)),
-                new V3MassProperties(6.0f, 0.5f, 0.5f, 0.5f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f)
-            );
+            try (V3CookedGrid grid = V3TestSupport.library().cookBlockGrid(
+                List.of(V3TestSupport.BLOCK_MATERIAL), List.of(new V3BlockCell(0, 0, 0, 0, 7_401)),
+                List.of(V3BlockBox.fullCube(0, 0, 7_401)))) {
+                world.attachBlockGrid(V3TestSupport.bodyDefinition(body), grid,
+                    new V3MassProperties(6.0f, 0.5f, 0.5f, 0.5f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f));
+            }
 
             V3StepResult result = world.step(
                 1,
@@ -124,5 +121,11 @@ class V3MovingVoxelTest {
 
             assertEquals(1.0 / 60.0, V3TestSupport.transform(result, 1_501).angularVelocityX(), 2.0e-4);
         }
+    }
+
+    private static V3CookedGrid twoCells() {
+        return V3TestSupport.library().cookBlockGrid(List.of(V3TestSupport.BLOCK_MATERIAL),
+            List.of(new V3BlockCell(0, 0, 0, 0, 1), new V3BlockCell(2, 0, 0, 0, 2)),
+            List.of(V3BlockBox.fullCube(0, 0, 1), V3BlockBox.fullCube(1, 0, 2)));
     }
 }

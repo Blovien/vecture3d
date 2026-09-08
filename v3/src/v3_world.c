@@ -33,7 +33,7 @@ void v3_test_fail_after( v3_test_fault fault, uint32_t successful_calls_before_f
 	v3_test_fault_state.successful_calls_before_failure = successful_calls_before_failure;
 }
 
-static bool v3_test_should_fail( v3_test_fault fault )
+bool v3_test_should_fail_internal( v3_test_fault fault )
 {
 	if ( v3_test_fault_state.fault != fault )
 	{
@@ -54,7 +54,7 @@ static bool v3_test_should_fail( v3_test_fault fault )
 static void* v3_calloc( v3_test_fault fault, size_t count, size_t size )
 {
 #if defined( V3_TESTING )
-	if ( v3_test_should_fail( fault ) )
+	if ( v3_test_should_fail_internal( fault ) )
 	{
 		return NULL;
 	}
@@ -67,7 +67,7 @@ static void* v3_calloc( v3_test_fault fault, size_t count, size_t size )
 static void* v3_realloc( v3_test_fault fault, void* memory, size_t size )
 {
 #if defined( V3_TESTING )
-	if ( v3_test_should_fail( fault ) )
+	if ( v3_test_should_fail_internal( fault ) )
 	{
 		return NULL;
 	}
@@ -80,7 +80,7 @@ static void* v3_realloc( v3_test_fault fault, void* memory, size_t size )
 static b3BodyId v3_create_body( b3WorldId world_id, const b3BodyDef* definition )
 {
 #if defined( V3_TESTING )
-	if ( v3_test_should_fail( V3_TEST_FAULT_CREATE_BODY ) )
+	if ( v3_test_should_fail_internal( V3_TEST_FAULT_CREATE_BODY ) )
 	{
 		return b3_nullBodyId;
 	}
@@ -91,7 +91,7 @@ static b3BodyId v3_create_body( b3WorldId world_id, const b3BodyDef* definition 
 static b3ShapeId v3_create_hull_shape( b3BodyId body_id, const b3ShapeDef* definition, const b3HullData* hull )
 {
 #if defined( V3_TESTING )
-	if ( v3_test_should_fail( V3_TEST_FAULT_CREATE_SHAPE ) )
+	if ( v3_test_should_fail_internal( V3_TEST_FAULT_CREATE_SHAPE ) )
 	{
 		return b3_nullShapeId;
 	}
@@ -185,7 +185,7 @@ static v3_status v3_validate_box( const v3_box_body_command* command )
 		return V3_INVALID_GENERATION;
 	}
 
-	if ( ( command->flags & ~( V3_BODY_ENABLE_SLEEP | V3_BODY_INITIAL_AWAKE | V3_BODY_DISABLE_COLLISION ) ) != 0 )
+	if ( !v3_body_flags_are_valid( command->kind, command->flags ) )
 	{
 		return V3_INVALID_ARGUMENT;
 	}
@@ -323,31 +323,63 @@ static void v3_destroy_pending_bodies( v3_pending_body* pending, uint32_t create
 	}
 }
 
-v3_world* v3_world_create_internal( double gravity_x, double gravity_y, double gravity_z )
+v3_world* v3_world_create_internal( double gravity_x, double gravity_y, double gravity_z, const v3_world_limits* limits )
 {
 	v3_world* world = v3_calloc( V3_TEST_FAULT_WORLD_CALLOC, 1, sizeof( *world ) );
 	if ( world == NULL )
 	{
 		return NULL;
 	}
+	world->block_contacts = v3_calloc( V3_TEST_FAULT_BLOCK_CONTACT_STORAGE_CALLOC, 1, sizeof( *world->block_contacts ) );
+	if ( world->block_contacts == NULL )
+	{
+		free( world );
+		return NULL;
+	}
 
 	b3WorldDef definition = b3DefaultWorldDef();
 	definition.gravity = (b3Vec3){ (float)gravity_x, (float)gravity_y, (float)gravity_z };
 
+	if ( limits != NULL )
 	{
-        // TODO: double check, but in theory island sleeping shouldn't account for this setting
-        definition.enableSleep = false;
+		// Zero means "keep the engine default" for every limit, so a zeroed record creates a default world
+		if ( limits->maximum_linear_speed > 0.0f )
+		{
+			definition.maximumLinearSpeed = limits->maximum_linear_speed;
+		}
+		definition.maximumAngularSpeed = limits->maximum_angular_speed;
+		definition.projectileCandidateCap = limits->projectile_candidate_cap;
+		definition.enableSleep = ( limits->flags & V3_WORLD_DISABLE_SLEEP ) == 0;
 	}
 
 	definition.workerCount = 1;
 	world->world_id = b3CreateWorld( &definition );
 	if ( B3_IS_NULL( world->world_id ) )
 	{
+		free( world->block_contacts );
 		free( world );
 		return NULL;
 	}
 
 	return world;
+}
+
+void v3_world_set_limits_internal( v3_world* world, const v3_world_limits* limits )
+{
+	b3World_SetMaximumLinearSpeed( world->world_id, limits->maximum_linear_speed > 0.0f
+														? limits->maximum_linear_speed
+														: b3DefaultWorldDef().maximumLinearSpeed );
+	b3World_SetMaximumAngularSpeed( world->world_id, limits->maximum_angular_speed );
+	b3World_SetProjectileCandidateCap( world->world_id, limits->projectile_candidate_cap );
+	b3World_EnableSleeping( world->world_id, ( limits->flags & V3_WORLD_DISABLE_SLEEP ) == 0 );
+}
+
+void v3_world_get_limits_internal( const v3_world* world, v3_world_limits* limits )
+{
+	limits->maximum_linear_speed = b3World_GetMaximumLinearSpeed( world->world_id );
+	limits->maximum_angular_speed = b3World_GetMaximumAngularSpeed( world->world_id );
+	limits->projectile_candidate_cap = b3World_GetProjectileCandidateCap( world->world_id );
+	limits->flags = b3World_IsSleepingEnabled( world->world_id ) ? 0u : V3_WORLD_DISABLE_SLEEP;
 }
 
 v3_status v3_world_replace_box_bodies_internal( v3_world* world, const v3_body_handle* removals, uint32_t removal_count,
@@ -411,6 +443,7 @@ v3_status v3_world_replace_box_bodies_internal( v3_world* world, const v3_body_h
 		body_definition.angularDamping = command->angular_damping;
 		body_definition.enableSleep = ( command->flags & V3_BODY_ENABLE_SLEEP ) != 0;
 		body_definition.isAwake = ( command->flags & V3_BODY_INITIAL_AWAKE ) != 0;
+		body_definition.isBullet = ( command->flags & V3_BODY_BULLET ) != 0;
 
 		b3BodyId body_id = v3_create_body( world->world_id, &body_definition );
 		if ( B3_IS_NULL( body_id ) )
@@ -422,6 +455,8 @@ v3_status v3_world_replace_box_bodies_internal( v3_world* world, const v3_body_h
 		b3ShapeDef shape_definition = b3DefaultShapeDef();
 		shape_definition.density = command->density;
 		shape_definition.baseMaterial.friction = command->friction;
+		shape_definition.enableContactEvents = true;
+		shape_definition.enableHitEvents = true;
 		shape_definition.filter.categoryBits = command->kind == V3_STATIC_BODY		? V3_STATIC_CATEGORY
 											   : command->kind == V3_KINEMATIC_BODY ? V3_KINEMATIC_CATEGORY
 																					: V3_DYNAMIC_CATEGORY;
@@ -498,6 +533,7 @@ void v3_world_destroy_internal( v3_world* world )
 
 	b3DestroyWorld( world->world_id );
 	free( world->body_entries );
+	free( world->block_contacts );
 	free( world );
 }
 

@@ -121,11 +121,11 @@ static int SafetyFactorRoundTrip( void )
 	int size = b3Recording_GetSize( rec );
 	ENSURE( size >= (int)sizeof( b3RecHeader ) + 2 * (int)sizeof( uint32_t ) );
 	const b3RecHeader* header = data;
-	ENSURE( header->versionMajor == 15 );
+	ENSURE( header->versionMajor == 16 );
 	ENSURE( header->snapshotSize >= 2 * sizeof( uint32_t ) );
 	uint32_t snapshotVersion = 0;
 	memcpy( &snapshotVersion, (const uint8_t*)data + sizeof( b3RecHeader ) + sizeof( uint32_t ), sizeof( snapshotVersion ) );
-	ENSURE( snapshotVersion == 10 );
+	ENSURE( snapshotVersion == 11 );
 	ENSURE( b3ValidateReplay( data, size, 1 ) );
 
 	b3RecPlayer* player = b3CreatePlayer( data, size, 1 );

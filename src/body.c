@@ -1547,9 +1547,9 @@ void b3Body_SetType( b3BodyId bodyId, b3BodyType type )
 		while ( shapeId != B3_NULL_INDEX )
 		{
 			b3Shape* shape = b3Array_Get( world->shapes, shapeId );
-			if ( shape->type == b3_compoundShape || shape->type == b3_heightShape || shape->type == b3_voxelShape )
+			if ( shape->type == b3_compoundShape || shape->type == b3_heightShape )
 			{
-				// Setting the body type is not supported for bodies with compound shapes
+				// Compounds and height fields require static bodies.
 				return;
 			}
 
@@ -1697,7 +1697,7 @@ void b3Body_SetType( b3BodyId bodyId, b3BodyType type )
 		// is placement-free and the proxy rebuild below is the only thing the
 		// change actually touches. That is what lets terrain cooked as static
 		// become a moving platform without being recooked.
-		B3_ASSERT( shape->type != b3_compoundShape && shape->type != b3_voxelShape );
+		B3_ASSERT( shape->type != b3_compoundShape );
 
 		shapeId = shape->nextShapeId;
 		b3DestroyShapeProxy( shape, &world->broadPhase );

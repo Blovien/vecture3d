@@ -40,7 +40,7 @@
 
 // Snapshot image magic 'BNS3' and version
 #define B3_SNAP_MAGIC 0x33534E42u
-#define B3_SNAP_VERSION 10u // BlockGrid contact state with legacy voxel tags retained
+#define B3_SNAP_VERSION 11u // Retained BlockGrid pair and affected contact array capacities
 
 #define B3_SNAP_FLAG_VALIDATION 0x1u
 #define B3_SNAP_FLAG_DOUBLE_PRECISION 0x2u
@@ -795,13 +795,6 @@ static void b3SerShapes( b3RecBuffer* buf, b3World* world, b3Recording* rec )
 				b3SnapW_U32( buf, gid );
 				break;
 			}
-			case b3_voxelShape:
-			{
-				b3SnapW_I32( buf, (int)b3_voxelShape );
-				uint32_t gid = b3RecInternCompound( rec, src->voxel );
-				b3SnapW_U32( buf, gid );
-				break;
-			}
 			case v3_blockGridShape:
 			{
 				b3SnapW_I32( buf, (int)v3_blockGridShape );
@@ -1013,24 +1006,6 @@ static void b3DesShapes( b3SnapReader* r, b3World* world, b3RecReader* rdr )
 					b3ConvertBytesToCompound( (uint8_t*)slot->live, slot->byteCount );
 				}
 				dst->compound = (const b3CompoundData*)slot->live;
-				break;
-			}
-			case b3_voxelShape:
-			{
-				uint32_t gid = b3SnapR_U32( r );
-				if ( !r->ok || rdr == NULL || gid >= (uint32_t)rdr->slotCount )
-				{
-					r->ok = false;
-					break;
-				}
-				b3RegistrySlot* slot = rdr->slots + gid;
-				if ( slot->live == NULL )
-				{
-					slot->live = b3Alloc( (size_t)slot->byteCount );
-					memcpy( slot->live, slot->bytes, (size_t)slot->byteCount );
-					b3ConvertBytesToCompound( (uint8_t*)slot->live, slot->byteCount );
-				}
-				dst->voxel = (const b3CompoundData*)slot->live;
 				break;
 			}
 			case v3_blockGridShape:

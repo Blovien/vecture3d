@@ -7,6 +7,34 @@
     "format": 1,
     "constants": [
         {
+            "name": "V3_BLOCK_CONTACT_BEGIN",
+            "value": 1
+        },
+        {
+            "name": "V3_BLOCK_CONTACT_END",
+            "value": 2
+        },
+        {
+            "name": "V3_BLOCK_CONTACT_EVENTS_TRUNCATED",
+            "value": 1
+        },
+        {
+            "name": "V3_BLOCK_CONTACT_EVENT_CAPACITY",
+            "value": 3072
+        },
+        {
+            "name": "V3_BLOCK_CONTACT_HIT",
+            "value": 4
+        },
+        {
+            "name": "V3_BLOCK_CONTACT_SIDE_GRID",
+            "value": 1
+        },
+        {
+            "name": "V3_BODY_BULLET",
+            "value": 8
+        },
+        {
             "name": "V3_BODY_DISABLE_COLLISION",
             "value": 4
         },
@@ -59,7 +87,7 @@
             "value": 1
         },
         {
-            "name": "V3_INVALID_BLOCK_FIELD",
+            "name": "V3_INVALID_BLOCK_GRID",
             "value": 26
         },
         {
@@ -119,8 +147,16 @@
             "value": 18
         },
         {
+            "name": "V3_JOINT_COLLIDE_CONNECTED",
+            "value": 8
+        },
+        {
             "name": "V3_JOINT_ENABLE_LIMIT",
             "value": 2
+        },
+        {
+            "name": "V3_JOINT_ENABLE_MOTOR",
+            "value": 4
         },
         {
             "name": "V3_JOINT_ENABLE_SPRING",
@@ -167,16 +203,48 @@
             "value": 27
         },
         {
+            "name": "V3_QUERY_BOX",
+            "value": 4
+        },
+        {
+            "name": "V3_QUERY_CAPSULE",
+            "value": 3
+        },
+        {
             "name": "V3_QUERY_CAST_HIT",
             "value": 2
+        },
+        {
+            "name": "V3_QUERY_HULL",
+            "value": 5
         },
         {
             "name": "V3_QUERY_IMMEDIATE_BLOCK",
             "value": 1
         },
         {
+            "name": "V3_QUERY_LEGACY_BOX",
+            "value": 0
+        },
+        {
+            "name": "V3_QUERY_MAX_POINTS",
+            "value": 64
+        },
+        {
             "name": "V3_QUERY_NO_HIT",
             "value": 0
+        },
+        {
+            "name": "V3_QUERY_RAY",
+            "value": 1
+        },
+        {
+            "name": "V3_QUERY_RESULT_BLOCK_GRID",
+            "value": 1
+        },
+        {
+            "name": "V3_QUERY_SPHERE",
+            "value": 2
         },
         {
             "name": "V3_SOURCE_REVISION_MISMATCH",
@@ -189,6 +257,10 @@
         {
             "name": "V3_STATIC_BODY",
             "value": 0
+        },
+        {
+            "name": "V3_WORLD_DISABLE_SLEEP",
+            "value": 1
         },
         {
             "name": "V3_WORLD_POISONED",
@@ -409,6 +481,16 @@
                     "name": "relative_normal_speed",
                     "ordinal": 13,
                     "type": "float"
+                },
+                {
+                    "name": "side_a",
+                    "ordinal": 16,
+                    "type": "v3_block_contact_side"
+                },
+                {
+                    "name": "side_b",
+                    "ordinal": 17,
+                    "type": "v3_block_contact_side"
                 }
             ]
         },
@@ -419,7 +501,58 @@
         },
         {
             "kind": "record",
-            "name": "v3_block_field_command",
+            "name": "v3_block_contact_side",
+            "fields": [
+                {
+                    "name": "cell_box_index",
+                    "ordinal": 3,
+                    "type": "int32_t"
+                },
+                {
+                    "name": "cell_x",
+                    "ordinal": 0,
+                    "type": "int32_t"
+                },
+                {
+                    "name": "cell_y",
+                    "ordinal": 1,
+                    "type": "int32_t"
+                },
+                {
+                    "name": "cell_z",
+                    "ordinal": 2,
+                    "type": "int32_t"
+                },
+                {
+                    "name": "flags",
+                    "ordinal": 5,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "material_index",
+                    "ordinal": 4,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "user_data",
+                    "ordinal": 7,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "user_material_id",
+                    "ordinal": 6,
+                    "type": "uint64_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_block_contact_side",
+            "type": "struct v3_block_contact_side"
+        },
+        {
+            "kind": "record",
+            "name": "v3_block_grid_command",
             "fields": [
                 {
                     "name": "body",
@@ -465,8 +598,8 @@
         },
         {
             "kind": "typedef",
-            "name": "v3_block_field_command",
-            "type": "struct v3_block_field_command"
+            "name": "v3_block_grid_command",
+            "type": "struct v3_block_grid_command"
         },
         {
             "kind": "record",
@@ -827,6 +960,69 @@
             "kind": "typedef",
             "name": "v3_box_body_command",
             "type": "struct v3_box_body_command"
+        },
+        {
+            "kind": "function",
+            "name": "v3_cook_block_grid",
+            "type": "v3_status (const v3_block_material *, uint32_t, const v3_block_cell *, uint32_t, const v3_block_box *, uint32_t, v3_cooked_grid **)",
+            "parameters": [
+                {
+                    "name": "materials",
+                    "ordinal": 0,
+                    "type": "const v3_block_material *"
+                },
+                {
+                    "name": "material_count",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "cells",
+                    "ordinal": 2,
+                    "type": "const v3_block_cell *"
+                },
+                {
+                    "name": "cell_count",
+                    "ordinal": 3,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "boxes",
+                    "ordinal": 4,
+                    "type": "const v3_block_box *"
+                },
+                {
+                    "name": "box_count",
+                    "ordinal": 5,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "out",
+                    "ordinal": 6,
+                    "type": "v3_cooked_grid **"
+                }
+            ]
+        },
+        {
+            "kind": "opaque",
+            "name": "v3_cooked_grid"
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_cooked_grid",
+            "type": "struct v3_cooked_grid"
+        },
+        {
+            "kind": "function",
+            "name": "v3_destroy_cooked_grid",
+            "type": "void (v3_cooked_grid *)",
+            "parameters": [
+                {
+                    "name": "grid",
+                    "ordinal": 0,
+                    "type": "v3_cooked_grid *"
+                }
+            ]
         },
         {
             "kind": "record",
@@ -1458,6 +1654,16 @@
             "name": "v3_query",
             "fields": [
                 {
+                    "name": "category_bits",
+                    "ordinal": 13,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "flags",
+                    "ordinal": 12,
+                    "type": "uint32_t"
+                },
+                {
                     "name": "half_extent_x",
                     "ordinal": 4,
                     "type": "float"
@@ -1471,6 +1677,16 @@
                     "name": "half_extent_z",
                     "ordinal": 6,
                     "type": "float"
+                },
+                {
+                    "name": "kind",
+                    "ordinal": 11,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "mask_bits",
+                    "ordinal": 14,
+                    "type": "uint64_t"
                 },
                 {
                     "name": "origin_x",
@@ -1488,9 +1704,34 @@
                     "type": "double"
                 },
                 {
+                    "name": "point_count",
+                    "ordinal": 15,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "point_x",
+                    "ordinal": 17,
+                    "type": "float[64]"
+                },
+                {
+                    "name": "point_y",
+                    "ordinal": 18,
+                    "type": "float[64]"
+                },
+                {
+                    "name": "point_z",
+                    "ordinal": 19,
+                    "type": "float[64]"
+                },
+                {
                     "name": "query_id",
                     "ordinal": 0,
                     "type": "uint64_t"
+                },
+                {
+                    "name": "radius",
+                    "ordinal": 16,
+                    "type": "float"
                 },
                 {
                     "name": "reserved",
@@ -1524,6 +1765,31 @@
             "name": "v3_query_result",
             "fields": [
                 {
+                    "name": "cell_box_index",
+                    "ordinal": 16,
+                    "type": "int32_t"
+                },
+                {
+                    "name": "cell_x",
+                    "ordinal": 13,
+                    "type": "int32_t"
+                },
+                {
+                    "name": "cell_y",
+                    "ordinal": 14,
+                    "type": "int32_t"
+                },
+                {
+                    "name": "cell_z",
+                    "ordinal": 15,
+                    "type": "int32_t"
+                },
+                {
+                    "name": "flags",
+                    "ordinal": 12,
+                    "type": "uint32_t"
+                },
+                {
                     "name": "fraction",
                     "ordinal": 4,
                     "type": "float"
@@ -1532,6 +1798,41 @@
                     "name": "hit_logical_id",
                     "ordinal": 3,
                     "type": "uint64_t"
+                },
+                {
+                    "name": "material_index",
+                    "ordinal": 17,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "normal_x",
+                    "ordinal": 9,
+                    "type": "float"
+                },
+                {
+                    "name": "normal_y",
+                    "ordinal": 10,
+                    "type": "float"
+                },
+                {
+                    "name": "normal_z",
+                    "ordinal": 11,
+                    "type": "float"
+                },
+                {
+                    "name": "point_x",
+                    "ordinal": 6,
+                    "type": "double"
+                },
+                {
+                    "name": "point_y",
+                    "ordinal": 7,
+                    "type": "double"
+                },
+                {
+                    "name": "point_z",
+                    "ordinal": 8,
+                    "type": "double"
                 },
                 {
                     "name": "query_id",
@@ -1549,9 +1850,24 @@
                     "type": "float"
                 },
                 {
+                    "name": "reserved3",
+                    "ordinal": 18,
+                    "type": "uint32_t"
+                },
+                {
                     "name": "status",
                     "ordinal": 1,
                     "type": "uint32_t"
+                },
+                {
+                    "name": "user_data",
+                    "ordinal": 20,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "user_material_id",
+                    "ordinal": 19,
+                    "type": "uint64_t"
                 }
             ]
         },
@@ -1582,6 +1898,152 @@
             "type": "struct v3_removed_cell"
         },
         {
+            "kind": "record",
+            "name": "v3_revolute_joint_command",
+            "fields": [
+                {
+                    "name": "body_a",
+                    "ordinal": 3,
+                    "type": "v3_body_handle"
+                },
+                {
+                    "name": "body_b",
+                    "ordinal": 4,
+                    "type": "v3_body_handle"
+                },
+                {
+                    "name": "damping_ratio",
+                    "ordinal": 21,
+                    "type": "float"
+                },
+                {
+                    "name": "flags",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "generation",
+                    "ordinal": 1,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "hertz",
+                    "ordinal": 20,
+                    "type": "float"
+                },
+                {
+                    "name": "local_anchor_a_x",
+                    "ordinal": 5,
+                    "type": "float"
+                },
+                {
+                    "name": "local_anchor_a_y",
+                    "ordinal": 6,
+                    "type": "float"
+                },
+                {
+                    "name": "local_anchor_a_z",
+                    "ordinal": 7,
+                    "type": "float"
+                },
+                {
+                    "name": "local_anchor_b_x",
+                    "ordinal": 12,
+                    "type": "float"
+                },
+                {
+                    "name": "local_anchor_b_y",
+                    "ordinal": 13,
+                    "type": "float"
+                },
+                {
+                    "name": "local_anchor_b_z",
+                    "ordinal": 14,
+                    "type": "float"
+                },
+                {
+                    "name": "local_rotation_a_w",
+                    "ordinal": 11,
+                    "type": "float"
+                },
+                {
+                    "name": "local_rotation_a_x",
+                    "ordinal": 8,
+                    "type": "float"
+                },
+                {
+                    "name": "local_rotation_a_y",
+                    "ordinal": 9,
+                    "type": "float"
+                },
+                {
+                    "name": "local_rotation_a_z",
+                    "ordinal": 10,
+                    "type": "float"
+                },
+                {
+                    "name": "local_rotation_b_w",
+                    "ordinal": 18,
+                    "type": "float"
+                },
+                {
+                    "name": "local_rotation_b_x",
+                    "ordinal": 15,
+                    "type": "float"
+                },
+                {
+                    "name": "local_rotation_b_y",
+                    "ordinal": 16,
+                    "type": "float"
+                },
+                {
+                    "name": "local_rotation_b_z",
+                    "ordinal": 17,
+                    "type": "float"
+                },
+                {
+                    "name": "logical_id",
+                    "ordinal": 0,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "lower_angle",
+                    "ordinal": 22,
+                    "type": "float"
+                },
+                {
+                    "name": "max_motor_torque",
+                    "ordinal": 24,
+                    "type": "float"
+                },
+                {
+                    "name": "motor_speed",
+                    "ordinal": 25,
+                    "type": "float"
+                },
+                {
+                    "name": "reserved0",
+                    "ordinal": 26,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "target_angle",
+                    "ordinal": 19,
+                    "type": "float"
+                },
+                {
+                    "name": "upper_angle",
+                    "ordinal": 23,
+                    "type": "float"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_revolute_joint_command",
+            "type": "struct v3_revolute_joint_command"
+        },
+        {
             "kind": "typedef",
             "name": "v3_status",
             "type": "uint32_t"
@@ -1590,6 +2052,61 @@
             "kind": "record",
             "name": "v3_step_stats",
             "fields": [
+                {
+                    "name": "block_contact_event_count",
+                    "ordinal": 29,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "block_contact_event_dropped_count",
+                    "ordinal": 30,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "block_contact_event_flags",
+                    "ordinal": 31,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "block_grid_candidate_hitbox_pair_count",
+                    "ordinal": 21,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "block_grid_cap_exhaustion_count",
+                    "ordinal": 25,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "block_grid_contact_count",
+                    "ordinal": 23,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "block_grid_contact_reduction_count",
+                    "ordinal": 28,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "block_grid_projectile_sweep_count",
+                    "ordinal": 24,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "block_grid_replacement_published_count",
+                    "ordinal": 26,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "block_grid_scratch_peak_bytes",
+                    "ordinal": 27,
+                    "type": "uint64_t"
+                },
+                {
+                    "name": "block_grid_touching_pair_count",
+                    "ordinal": 22,
+                    "type": "uint64_t"
+                },
                 {
                     "name": "body_count",
                     "ordinal": 1,
@@ -1704,123 +2221,6 @@
         },
         {
             "kind": "record",
-            "name": "v3_terrain_box",
-            "fields": [
-                {
-                    "name": "center_x",
-                    "ordinal": 0,
-                    "type": "float"
-                },
-                {
-                    "name": "center_y",
-                    "ordinal": 1,
-                    "type": "float"
-                },
-                {
-                    "name": "center_z",
-                    "ordinal": 2,
-                    "type": "float"
-                },
-                {
-                    "name": "feature_id",
-                    "ordinal": 8,
-                    "type": "uint64_t"
-                },
-                {
-                    "name": "friction",
-                    "ordinal": 6,
-                    "type": "float"
-                },
-                {
-                    "name": "half_extent_x",
-                    "ordinal": 3,
-                    "type": "float"
-                },
-                {
-                    "name": "half_extent_y",
-                    "ordinal": 4,
-                    "type": "float"
-                },
-                {
-                    "name": "half_extent_z",
-                    "ordinal": 5,
-                    "type": "float"
-                },
-                {
-                    "name": "reserved",
-                    "ordinal": 7,
-                    "type": "uint32_t"
-                }
-            ]
-        },
-        {
-            "kind": "typedef",
-            "name": "v3_terrain_box",
-            "type": "struct v3_terrain_box"
-        },
-        {
-            "kind": "record",
-            "name": "v3_terrain_section_command",
-            "fields": [
-                {
-                    "name": "detail_box_count",
-                    "ordinal": 5,
-                    "type": "uint32_t"
-                },
-                {
-                    "name": "detail_box_offset",
-                    "ordinal": 4,
-                    "type": "uint32_t"
-                },
-                {
-                    "name": "generation",
-                    "ordinal": 1,
-                    "type": "uint32_t"
-                },
-                {
-                    "name": "logical_id",
-                    "ordinal": 0,
-                    "type": "uint64_t"
-                },
-                {
-                    "name": "origin_x",
-                    "ordinal": 7,
-                    "type": "double"
-                },
-                {
-                    "name": "origin_y",
-                    "ordinal": 8,
-                    "type": "double"
-                },
-                {
-                    "name": "origin_z",
-                    "ordinal": 9,
-                    "type": "double"
-                },
-                {
-                    "name": "reserved",
-                    "ordinal": 6,
-                    "type": "uint32_t"
-                },
-                {
-                    "name": "voxel_run_count",
-                    "ordinal": 3,
-                    "type": "uint32_t"
-                },
-                {
-                    "name": "voxel_run_offset",
-                    "ordinal": 2,
-                    "type": "uint32_t"
-                }
-            ]
-        },
-        {
-            "kind": "typedef",
-            "name": "v3_terrain_section_command",
-            "type": "struct v3_terrain_section_command"
-        },
-        {
-            "kind": "record",
             "name": "v3_transform",
             "fields": [
                 {
@@ -1931,22 +2331,6 @@
             "type": "struct v3_transform"
         },
         {
-            "kind": "record",
-            "name": "v3_voxel_run",
-            "fields": [
-                {
-                    "name": "packed",
-                    "ordinal": 0,
-                    "type": "uint32_t"
-                }
-            ]
-        },
-        {
-            "kind": "typedef",
-            "name": "v3_voxel_run",
-            "type": "struct v3_voxel_run"
-        },
-        {
             "kind": "opaque",
             "name": "v3_world"
         },
@@ -1957,8 +2341,40 @@
         },
         {
             "kind": "function",
+            "name": "v3_world_attach_block_grid",
+            "type": "v3_status (v3_world *, const v3_body_definition *, v3_cooked_grid *, const v3_mass_properties *, v3_body_handle *)",
+            "parameters": [
+                {
+                    "name": "world",
+                    "ordinal": 0,
+                    "type": "v3_world *"
+                },
+                {
+                    "name": "body",
+                    "ordinal": 1,
+                    "type": "const v3_body_definition *"
+                },
+                {
+                    "name": "grid",
+                    "ordinal": 2,
+                    "type": "v3_cooked_grid *"
+                },
+                {
+                    "name": "mass_override",
+                    "ordinal": 3,
+                    "type": "const v3_mass_properties *"
+                },
+                {
+                    "name": "out",
+                    "ordinal": 4,
+                    "type": "v3_body_handle *"
+                }
+            ]
+        },
+        {
+            "kind": "function",
             "name": "v3_world_create",
-            "type": "v3_world *(double, double, double)",
+            "type": "v3_world *(double, double, double, const v3_world_limits *)",
             "parameters": [
                 {
                     "name": "gravity_x",
@@ -1974,6 +2390,11 @@
                     "name": "gravity_z",
                     "ordinal": 2,
                     "type": "double"
+                },
+                {
+                    "name": "limits",
+                    "ordinal": 3,
+                    "type": "const v3_world_limits *"
                 }
             ]
         },
@@ -2006,8 +2427,8 @@
         },
         {
             "kind": "function",
-            "name": "v3_world_create_voxel_group",
-            "type": "v3_status (v3_world *, const v3_box_body_command *, const v3_terrain_box *, uint32_t, const v3_mass_properties *)",
+            "name": "v3_world_create_sphere_body",
+            "type": "v3_status (v3_world *, const v3_body_definition *, float, float, float, v3_body_handle *)",
             "parameters": [
                 {
                     "name": "world",
@@ -2015,24 +2436,29 @@
                     "type": "v3_world *"
                 },
                 {
-                    "name": "command",
+                    "name": "body",
                     "ordinal": 1,
-                    "type": "const v3_box_body_command *"
+                    "type": "const v3_body_definition *"
                 },
                 {
-                    "name": "boxes",
+                    "name": "radius",
                     "ordinal": 2,
-                    "type": "const v3_terrain_box *"
+                    "type": "float"
                 },
                 {
-                    "name": "box_count",
+                    "name": "density",
                     "ordinal": 3,
-                    "type": "uint32_t"
+                    "type": "float"
                 },
                 {
-                    "name": "mass_properties",
+                    "name": "friction",
                     "ordinal": 4,
-                    "type": "const v3_mass_properties *"
+                    "type": "float"
+                },
+                {
+                    "name": "out",
+                    "ordinal": 5,
+                    "type": "v3_body_handle *"
                 }
             ]
         },
@@ -2045,6 +2471,103 @@
                     "name": "world",
                     "ordinal": 0,
                     "type": "v3_world *"
+                }
+            ]
+        },
+        {
+            "kind": "function",
+            "name": "v3_world_get_block_contact_events",
+            "type": "v3_status (const v3_world *, v3_block_contact_event *, uint32_t, uint32_t *)",
+            "parameters": [
+                {
+                    "name": "world",
+                    "ordinal": 0,
+                    "type": "const v3_world *"
+                },
+                {
+                    "name": "events",
+                    "ordinal": 1,
+                    "type": "v3_block_contact_event *"
+                },
+                {
+                    "name": "event_capacity",
+                    "ordinal": 2,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "event_count",
+                    "ordinal": 3,
+                    "type": "uint32_t *"
+                }
+            ]
+        },
+        {
+            "kind": "function",
+            "name": "v3_world_get_limits",
+            "type": "v3_status (v3_world *, v3_world_limits *)",
+            "parameters": [
+                {
+                    "name": "world",
+                    "ordinal": 0,
+                    "type": "v3_world *"
+                },
+                {
+                    "name": "limits",
+                    "ordinal": 1,
+                    "type": "v3_world_limits *"
+                }
+            ]
+        },
+        {
+            "kind": "record",
+            "name": "v3_world_limits",
+            "fields": [
+                {
+                    "name": "flags",
+                    "ordinal": 3,
+                    "type": "uint32_t"
+                },
+                {
+                    "name": "maximum_angular_speed",
+                    "ordinal": 1,
+                    "type": "float"
+                },
+                {
+                    "name": "maximum_linear_speed",
+                    "ordinal": 0,
+                    "type": "float"
+                },
+                {
+                    "name": "projectile_candidate_cap",
+                    "ordinal": 2,
+                    "type": "int32_t"
+                }
+            ]
+        },
+        {
+            "kind": "typedef",
+            "name": "v3_world_limits",
+            "type": "struct v3_world_limits"
+        },
+        {
+            "kind": "function",
+            "name": "v3_world_replace_block_grid",
+            "type": "v3_status (v3_world *, const v3_body_handle *, v3_cooked_grid *)",
+            "parameters": [
+                {
+                    "name": "world",
+                    "ordinal": 0,
+                    "type": "v3_world *"
+                },
+                {
+                    "name": "body",
+                    "ordinal": 1,
+                    "type": "const v3_body_handle *"
+                },
+                {
+                    "name": "grid",
+                    "ordinal": 2,
+                    "type": "v3_cooked_grid *"
                 }
             ]
         },
@@ -2114,8 +2637,8 @@
         },
         {
             "kind": "function",
-            "name": "v3_world_replace_terrain_sections",
-            "type": "v3_status (v3_world *, const v3_body_handle *, uint32_t, const v3_terrain_section_command *, uint32_t, const v3_voxel_run *, uint32_t, const v3_terrain_box *, uint32_t)",
+            "name": "v3_world_replace_revolute_joints",
+            "type": "v3_status (v3_world *, const v3_joint_handle *, uint32_t, const v3_revolute_joint_command *, uint32_t)",
             "parameters": [
                 {
                     "name": "world",
@@ -2125,7 +2648,7 @@
                 {
                     "name": "removals",
                     "ordinal": 1,
-                    "type": "const v3_body_handle *"
+                    "type": "const v3_joint_handle *"
                 },
                 {
                     "name": "removal_count",
@@ -2133,34 +2656,31 @@
                     "type": "uint32_t"
                 },
                 {
-                    "name": "sections",
+                    "name": "creations",
                     "ordinal": 3,
-                    "type": "const v3_terrain_section_command *"
+                    "type": "const v3_revolute_joint_command *"
                 },
                 {
-                    "name": "section_count",
+                    "name": "creation_count",
                     "ordinal": 4,
                     "type": "uint32_t"
+                }
+            ]
+        },
+        {
+            "kind": "function",
+            "name": "v3_world_set_limits",
+            "type": "v3_status (v3_world *, const v3_world_limits *)",
+            "parameters": [
+                {
+                    "name": "world",
+                    "ordinal": 0,
+                    "type": "v3_world *"
                 },
                 {
-                    "name": "voxel_runs",
-                    "ordinal": 5,
-                    "type": "const v3_voxel_run *"
-                },
-                {
-                    "name": "voxel_run_count",
-                    "ordinal": 6,
-                    "type": "uint32_t"
-                },
-                {
-                    "name": "detail_boxes",
-                    "ordinal": 7,
-                    "type": "const v3_terrain_box *"
-                },
-                {
-                    "name": "detail_box_count",
-                    "ordinal": 8,
-                    "type": "uint32_t"
+                    "name": "limits",
+                    "ordinal": 1,
+                    "type": "const v3_world_limits *"
                 }
             ]
         },

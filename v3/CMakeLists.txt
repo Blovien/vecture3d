@@ -2,6 +2,7 @@ set_property(TARGET box3d PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 add_library(vecture3d_native SHARED
 	src/v3_abi.c
+	src/v3_block_grid.c
 	src/v3_geometry.c
 	src/v3_joint.c
 	src/v3_step.c
@@ -33,11 +34,13 @@ set_target_properties(v3_native_tests PROPERTIES
 add_executable(v3_geometry_tests
 	test/test_geometry.c
 	src/v3_abi.c
+	src/v3_block_grid.c
 	src/v3_geometry.c
 	src/v3_joint.c
 	src/v3_step.c
 	src/v3_world.c
 )
+target_compile_definitions(v3_geometry_tests PRIVATE V3_TESTING)
 target_include_directories(v3_geometry_tests PRIVATE
 	"${PROJECT_SOURCE_DIR}/ffi-java/src/main/public"
 	"${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -53,11 +56,13 @@ set_target_properties(v3_geometry_tests PROPERTIES
 add_executable(v3_joint_tests
 	test/test_joint.c
 	src/v3_abi.c
+	src/v3_block_grid.c
 	src/v3_geometry.c
 	src/v3_joint.c
 	src/v3_step.c
 	src/v3_world.c
 )
+target_compile_definitions(v3_joint_tests PRIVATE V3_TESTING)
 target_include_directories(v3_joint_tests PRIVATE
 	"${PROJECT_SOURCE_DIR}/ffi-java/src/main/public"
 	"${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -73,11 +78,13 @@ set_target_properties(v3_joint_tests PROPERTIES
 add_executable(v3_step_tests
 	test/test_step.c
 	src/v3_abi.c
+	src/v3_block_grid.c
 	src/v3_geometry.c
 	src/v3_joint.c
 	src/v3_step.c
 	src/v3_world.c
 )
+target_compile_definitions(v3_step_tests PRIVATE V3_TESTING)
 target_include_directories(v3_step_tests PRIVATE
 	"${PROJECT_SOURCE_DIR}/ffi-java/src/main/public"
 	"${CMAKE_CURRENT_SOURCE_DIR}/src"

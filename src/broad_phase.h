@@ -56,7 +56,7 @@ void b3BroadPhase_DestroyProxy( b3BroadPhase* bp, int proxyKey );
 void b3BroadPhase_MoveProxy( b3BroadPhase* bp, int proxyKey, b3AABB aabb );
 void b3BroadPhase_EnlargeProxy( b3BroadPhase* bp, int proxyKey, b3AABB aabb );
 
-// A newly streamed voxel section is static, so pair it by moving the overlapping dynamic proxies instead.
+// Buffer overlapping dynamic proxies to create pairs with newly attached or replaced geometry.
 void b3BroadPhase_BufferDynamicOverlaps( b3BroadPhase* bp, b3AABB aabb );
 
 int b3BroadPhase_GetShapeIndex( b3BroadPhase* bp, int proxyKey );

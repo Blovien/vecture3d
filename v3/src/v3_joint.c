@@ -105,9 +105,8 @@ v3_status v3_world_replace_box_bodies_joint_aware_internal( v3_world* world, con
 															uint32_t creation_count )
 {
 	v3_status status = v3_joint_validate_body_removals_internal( world, removals, removal_count );
-	return status == V3_OK
-			   ? v3_world_replace_box_bodies_geometry_aware_internal( world, removals, removal_count, creations, creation_count )
-			   : status;
+	return status == V3_OK ? v3_world_replace_box_bodies_internal( world, removals, removal_count, creations, creation_count )
+						   : status;
 }
 
 static v3_status v3_joint_validate_removals( const v3_world* world, const v3_joint_handle* removals, uint32_t removal_count )
@@ -191,31 +190,95 @@ static v3_status v3_joint_validate_command( const v3_world* world, const v3_dist
 	return status == V3_OK ? v3_joint_validate_body( world, &command->body_b ) : status;
 }
 
+// Both command records contribute the same identity and body relationships to the transaction.
+typedef struct v3_joint_creation
+{
+	uint64_t logical_id;
+	uint32_t generation;
+	v3_body_handle body_a;
+	v3_body_handle body_b;
+} v3_joint_creation;
+
+static v3_joint_creation v3_joint_creation_at( const v3_distance_joint_command* distance,
+											   const v3_revolute_joint_command* revolute, uint32_t index )
+{
+	if ( revolute != NULL )
+	{
+		const v3_revolute_joint_command* c = revolute + index;
+		return (v3_joint_creation){ c->logical_id, c->generation, c->body_a, c->body_b };
+	}
+	const v3_distance_joint_command* c = distance + index;
+	return (v3_joint_creation){ c->logical_id, c->generation, c->body_a, c->body_b };
+}
+
+static v3_status v3_revolute_validate_command( const v3_world* world, const v3_revolute_joint_command* command )
+{
+	if ( command->logical_id == 0 || command->reserved0 != 0 ||
+		 ( command->flags &
+		   ~( V3_JOINT_ENABLE_SPRING | V3_JOINT_ENABLE_LIMIT | V3_JOINT_ENABLE_MOTOR | V3_JOINT_COLLIDE_CONNECTED ) ) != 0 )
+	{
+		return V3_INVALID_ARGUMENT;
+	}
+	if ( command->generation == 0 || command->generation > INT32_MAX )
+	{
+		return V3_INVALID_GENERATION;
+	}
+	if ( !isfinite( command->local_anchor_a_x ) || !isfinite( command->local_anchor_a_y ) ||
+		 !isfinite( command->local_anchor_a_z ) || !isfinite( command->local_anchor_b_x ) ||
+		 !isfinite( command->local_anchor_b_y ) || !isfinite( command->local_anchor_b_z ) || !isfinite( command->target_angle ) ||
+		 !isfinite( command->hertz ) || !isfinite( command->damping_ratio ) || !isfinite( command->lower_angle ) ||
+		 !isfinite( command->upper_angle ) || !isfinite( command->max_motor_torque ) || !isfinite( command->motor_speed ) )
+	{
+		return V3_NON_FINITE;
+	}
+	if ( !v3_geometry_is_normalized_quaternion_internal( command->local_rotation_a_x, command->local_rotation_a_y,
+														 command->local_rotation_a_z, command->local_rotation_a_w ) ||
+		 !v3_geometry_is_normalized_quaternion_internal( command->local_rotation_b_x, command->local_rotation_b_y,
+														 command->local_rotation_b_z, command->local_rotation_b_w ) )
+	{
+		return V3_INVALID_QUATERNION;
+	}
+	if ( command->hertz < 0 || command->damping_ratio < 0 )
+	{
+		return V3_INVALID_DAMPING;
+	}
+	if ( command->max_motor_torque < 0 || command->target_angle < -B3_PI || command->target_angle > B3_PI ||
+		 command->lower_angle < -0.99f * B3_PI || command->upper_angle > 0.99f * B3_PI ||
+		 command->lower_angle > command->upper_angle || command->body_a.logical_id == command->body_b.logical_id )
+	{
+		return V3_INVALID_ARGUMENT;
+	}
+	v3_status status = v3_joint_validate_body( world, &command->body_a );
+	return status == V3_OK ? v3_joint_validate_body( world, &command->body_b ) : status;
+}
+
 static v3_status v3_joint_validate_creations( const v3_world* world, const v3_joint_handle* removals, uint32_t removal_count,
-											  const v3_distance_joint_command* creations, uint32_t creation_count,
+											  const v3_distance_joint_command* distance,
+											  const v3_revolute_joint_command* revolute, uint32_t creation_count,
 											  uint32_t* new_entry_count )
 {
 	*new_entry_count = 0;
 	for ( uint32_t index = 0; index < creation_count; ++index )
 	{
-		const v3_distance_joint_command* creation = creations + index;
-		v3_status status = v3_joint_validate_command( world, creation );
+		v3_joint_creation creation = v3_joint_creation_at( distance, revolute, index );
+		v3_status status = revolute != NULL ? v3_revolute_validate_command( world, revolute + index )
+											: v3_joint_validate_command( world, distance + index );
 		if ( status != V3_OK )
 		{
 			return status;
 		}
 		for ( uint32_t previous = 0; previous < index; ++previous )
 		{
-			if ( creations[previous].logical_id == creation->logical_id )
+			if ( v3_joint_creation_at( distance, revolute, previous ).logical_id == creation.logical_id )
 			{
 				return V3_DUPLICATE_ID;
 			}
 		}
 
-		int entry_index = v3_joint_find_entry( world, creation->logical_id );
+		int entry_index = v3_joint_find_entry( world, creation.logical_id );
 		if ( entry_index < 0 )
 		{
-			if ( creation->generation != 1 )
+			if ( creation.generation != 1 )
 			{
 				return V3_INVALID_GENERATION;
 			}
@@ -224,7 +287,7 @@ static v3_status v3_joint_validate_creations( const v3_world* world, const v3_jo
 		}
 
 		const v3_joint_entry* entry = world->joint_entries + entry_index;
-		if ( entry->is_active && !v3_joint_removes_logical_id( removals, removal_count, creation->logical_id ) )
+		if ( entry->is_active && !v3_joint_removes_logical_id( removals, removal_count, creation.logical_id ) )
 		{
 			return V3_DUPLICATE_ID;
 		}
@@ -232,7 +295,7 @@ static v3_status v3_joint_validate_creations( const v3_world* world, const v3_jo
 		{
 			return V3_GENERATION_EXHAUSTED;
 		}
-		if ( creation->generation != entry->generation + 1u )
+		if ( creation.generation != entry->generation + 1u )
 		{
 			return V3_INVALID_GENERATION;
 		}
@@ -267,8 +330,59 @@ static uint32_t v3_joint_saturating_add( uint32_t value, uint32_t increment )
 	return value >= maximum || maximum - value < increment ? maximum : value + increment;
 }
 
-v3_status v3_world_replace_distance_joints_internal( v3_world* world, const v3_joint_handle* removals, uint32_t removal_count,
-													 const v3_distance_joint_command* creations, uint32_t creation_count )
+static b3JointId v3_create_distance_joint( v3_world* world, const v3_distance_joint_command* command )
+{
+	int body_a_index = v3_joint_find_body_entry( world, command->body_a.logical_id );
+	int body_b_index = v3_joint_find_body_entry( world, command->body_b.logical_id );
+	b3DistanceJointDef definition = b3DefaultDistanceJointDef();
+	definition.base.bodyIdA = world->body_entries[body_a_index].body_id;
+	definition.base.bodyIdB = world->body_entries[body_b_index].body_id;
+	definition.base.localFrameA = b3Transform_identity;
+	definition.base.localFrameA.p = (b3Vec3){ command->local_anchor_a_x, command->local_anchor_a_y, command->local_anchor_a_z };
+	definition.base.localFrameB = b3Transform_identity;
+	definition.base.localFrameB.p = (b3Vec3){ command->local_anchor_b_x, command->local_anchor_b_y, command->local_anchor_b_z };
+	definition.base.collideConnected = false;
+	definition.length = command->rest_length;
+	definition.enableSpring = ( command->flags & V3_JOINT_ENABLE_SPRING ) != 0;
+	definition.lowerSpringForce = command->lower_spring_force;
+	definition.upperSpringForce = command->upper_spring_force;
+	definition.hertz = command->hertz;
+	definition.dampingRatio = command->damping_ratio;
+	definition.enableLimit = ( command->flags & V3_JOINT_ENABLE_LIMIT ) != 0;
+	definition.minLength = command->minimum_length;
+	definition.maxLength = command->maximum_length;
+	definition.enableMotor = false;
+	return b3CreateDistanceJoint( world->world_id, &definition );
+}
+
+static b3JointId v3_create_revolute_joint( v3_world* world, const v3_revolute_joint_command* command )
+{
+	b3RevoluteJointDef definition = b3DefaultRevoluteJointDef();
+	definition.base.bodyIdA = world->body_entries[v3_joint_find_body_entry( world, command->body_a.logical_id )].body_id;
+	definition.base.bodyIdB = world->body_entries[v3_joint_find_body_entry( world, command->body_b.logical_id )].body_id;
+	definition.base.localFrameA.p = (b3Vec3){ command->local_anchor_a_x, command->local_anchor_a_y, command->local_anchor_a_z };
+	definition.base.localFrameA.q = (b3Quat){
+		{ command->local_rotation_a_x, command->local_rotation_a_y, command->local_rotation_a_z }, command->local_rotation_a_w };
+	definition.base.localFrameB.p = (b3Vec3){ command->local_anchor_b_x, command->local_anchor_b_y, command->local_anchor_b_z };
+	definition.base.localFrameB.q = (b3Quat){
+		{ command->local_rotation_b_x, command->local_rotation_b_y, command->local_rotation_b_z }, command->local_rotation_b_w };
+	definition.base.collideConnected = ( command->flags & V3_JOINT_COLLIDE_CONNECTED ) != 0;
+	definition.targetAngle = command->target_angle;
+	definition.hertz = command->hertz;
+	definition.dampingRatio = command->damping_ratio;
+	definition.lowerAngle = command->lower_angle;
+	definition.upperAngle = command->upper_angle;
+	definition.maxMotorTorque = command->max_motor_torque;
+	definition.motorSpeed = command->motor_speed;
+	definition.enableSpring = ( command->flags & V3_JOINT_ENABLE_SPRING ) != 0;
+	definition.enableLimit = ( command->flags & V3_JOINT_ENABLE_LIMIT ) != 0;
+	definition.enableMotor = ( command->flags & V3_JOINT_ENABLE_MOTOR ) != 0;
+	return b3CreateRevoluteJoint( world->world_id, &definition );
+}
+
+static v3_status v3_world_replace_joints( v3_world* world, const v3_joint_handle* removals, uint32_t removal_count,
+										  const v3_distance_joint_command* distance, const v3_revolute_joint_command* revolute,
+										  uint32_t creation_count )
 {
 	v3_status status = v3_joint_validate_removals( world, removals, removal_count );
 	if ( status != V3_OK )
@@ -276,7 +390,7 @@ v3_status v3_world_replace_distance_joints_internal( v3_world* world, const v3_j
 		return status;
 	}
 	uint32_t new_entry_count = 0;
-	status = v3_joint_validate_creations( world, removals, removal_count, creations, creation_count, &new_entry_count );
+	status = v3_joint_validate_creations( world, removals, removal_count, distance, revolute, creation_count, &new_entry_count );
 	if ( status != V3_OK )
 	{
 		return status;
@@ -310,43 +424,31 @@ v3_status v3_world_replace_distance_joints_internal( v3_world* world, const v3_j
 	uint32_t created_count = 0;
 	for ( uint32_t index = 0; index < creation_count; ++index )
 	{
-		const v3_distance_joint_command* command = creations + index;
-		int body_a_index = v3_joint_find_body_entry( world, command->body_a.logical_id );
-		int body_b_index = v3_joint_find_body_entry( world, command->body_b.logical_id );
-		b3DistanceJointDef definition = b3DefaultDistanceJointDef();
-		definition.base.bodyIdA = world->body_entries[body_a_index].body_id;
-		definition.base.bodyIdB = world->body_entries[body_b_index].body_id;
-		definition.base.localFrameA = b3Transform_identity;
-		definition.base.localFrameA.p =
-			(b3Vec3){ command->local_anchor_a_x, command->local_anchor_a_y, command->local_anchor_a_z };
-		definition.base.localFrameB = b3Transform_identity;
-		definition.base.localFrameB.p =
-			(b3Vec3){ command->local_anchor_b_x, command->local_anchor_b_y, command->local_anchor_b_z };
-		definition.base.collideConnected = false;
-		definition.length = command->rest_length;
-		definition.enableSpring = ( command->flags & V3_JOINT_ENABLE_SPRING ) != 0;
-		definition.lowerSpringForce = command->lower_spring_force;
-		definition.upperSpringForce = command->upper_spring_force;
-		definition.hertz = command->hertz;
-		definition.dampingRatio = command->damping_ratio;
-		definition.enableLimit = ( command->flags & V3_JOINT_ENABLE_LIMIT ) != 0;
-		definition.minLength = command->minimum_length;
-		definition.maxLength = command->maximum_length;
-		definition.enableMotor = false;
-		b3JointId joint_id = b3CreateDistanceJoint( world->world_id, &definition );
+		v3_joint_creation command = v3_joint_creation_at( distance, revolute, index );
+		// Box3D joint allocation has no recoverable allocator failure contract. Inject only at
+		// this call boundary, after any earlier creations, to exercise the real rollback path.
+#if defined( V3_TESTING )
+		if ( v3_test_should_fail_internal( V3_TEST_FAULT_CREATE_JOINT ) )
+		{
+			status = V3_NATIVE_FAILURE;
+			break;
+		}
+#endif
+		b3JointId joint_id = revolute != NULL ? v3_create_revolute_joint( world, revolute + index )
+											  : v3_create_distance_joint( world, distance + index );
 		if ( B3_IS_NULL( joint_id ) )
 		{
 			status = V3_NATIVE_FAILURE;
 			break;
 		}
 		pending[created_count++] = (v3_pending_joint){
-			.logical_id = command->logical_id,
-			.generation = command->generation,
+			.logical_id = command.logical_id,
+			.generation = command.generation,
 			.joint_id = joint_id,
-			.body_a_logical_id = command->body_a.logical_id,
-			.body_a_generation = command->body_a.generation,
-			.body_b_logical_id = command->body_b.logical_id,
-			.body_b_generation = command->body_b.generation,
+			.body_a_logical_id = command.body_a.logical_id,
+			.body_a_generation = command.body_a.generation,
+			.body_b_logical_id = command.body_b.logical_id,
+			.body_b_generation = command.body_b.generation,
 		};
 	}
 
@@ -394,6 +496,18 @@ v3_status v3_world_replace_distance_joints_internal( v3_world* world, const v3_j
 	}
 	free( pending );
 	return V3_OK;
+}
+
+v3_status v3_world_replace_distance_joints_internal( v3_world* world, const v3_joint_handle* removals, uint32_t removal_count,
+													 const v3_distance_joint_command* creations, uint32_t creation_count )
+{
+	return v3_world_replace_joints( world, removals, removal_count, creations, NULL, creation_count );
+}
+
+v3_status v3_world_replace_revolute_joints_internal( v3_world* world, const v3_joint_handle* removals, uint32_t removal_count,
+													 const v3_revolute_joint_command* creations, uint32_t creation_count )
+{
+	return v3_world_replace_joints( world, removals, removal_count, NULL, creations, creation_count );
 }
 
 void v3_joint_destroy_state_internal( v3_world* world )

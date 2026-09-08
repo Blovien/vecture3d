@@ -624,7 +624,7 @@ static void b3SolveContinuous( b3World* world, int bodySimIndex, b3TaskContext* 
 		// grid travelling fast enough to want this leans on the discrete path
 		// and its fat AABB margins instead.
 		if ( fastShape->type == b3_meshShape || fastShape->type == b3_heightShape || fastShape->type == b3_compoundShape ||
-			 fastShape->type == b3_voxelShape || fastShape->type == v3_blockGridShape )
+			 fastShape->type == v3_blockGridShape )
 		{
 			continue;
 		}

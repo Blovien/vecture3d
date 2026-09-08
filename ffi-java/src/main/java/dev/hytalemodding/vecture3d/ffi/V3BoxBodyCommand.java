@@ -31,7 +31,10 @@ public record V3BoxBodyCommand(
     public static final int INITIAL_AWAKE_FLAG = 1 << 1;
     public static final int DISABLE_COLLISION_FLAG = 1 << 2;
 
-    private static final int ALLOWED_FLAGS = ENABLE_SLEEP_FLAG | INITIAL_AWAKE_FLAG | DISABLE_COLLISION_FLAG;
+    /** Enables the native Projectile sweep on a dynamic body. Sweeps between two bullet bodies are excluded. */
+    public static final int BULLET_FLAG = 1 << 3;
+
+    private static final int ALLOWED_FLAGS = ENABLE_SLEEP_FLAG | INITIAL_AWAKE_FLAG | DISABLE_COLLISION_FLAG | BULLET_FLAG;
     private static final float MAX_DAMPING = 10.0f;
 
     public V3BoxBodyCommand {
@@ -39,6 +42,9 @@ public record V3BoxBodyCommand(
         Objects.requireNonNull(kind, "kind");
         if ((flags & ~ALLOWED_FLAGS) != 0) {
             throw new IllegalArgumentException("flags contain unsupported bits");
+        }
+        if ((flags & BULLET_FLAG) != 0 && kind != Kind.DYNAMIC) {
+            throw new IllegalArgumentException("bullet bodies must be dynamic");
         }
         if (!Double.isFinite(positionX) || !Double.isFinite(positionY) || !Double.isFinite(positionZ)
             || !allFinite(
