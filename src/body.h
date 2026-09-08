@@ -184,7 +184,7 @@ static const b3BodyState b3_identityBodyState = {
 // Transform data used for collision and solver preparation.
 typedef struct b3BodySim
 {
-	// transform for body origin, double translation in large world mode
+	// transform for body origin with double precision translation
 	b3WorldTransform transform;
 
 	// center of mass position in world space

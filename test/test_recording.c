@@ -159,6 +159,19 @@ static int SafetyFactorRoundTrip( void )
 	ENSURE( b3CreatePlayer( oldVersion, size, 1 ) == NULL );
 	ENSURE( b3ValidateReplay( oldVersion, size, 1 ) == false );
 
+	// The snapshot flags follow its magic, version and layout hash. Clear the double
+	// precision flag while preserving the layout hash to exercise the format check.
+	memcpy( oldVersion, data, (size_t)size );
+	size_t flagsOffset = sizeof( b3RecHeader ) + 3 * sizeof( uint32_t );
+	ENSURE( header->snapshotSize >= 4 * sizeof( uint32_t ) );
+	uint32_t snapshotFlags;
+	memcpy( &snapshotFlags, oldVersion + flagsOffset, sizeof( snapshotFlags ) );
+	ENSURE( ( snapshotFlags & 0x2u ) != 0 );
+	snapshotFlags &= ~0x2u;
+	memcpy( oldVersion + flagsOffset, &snapshotFlags, sizeof( snapshotFlags ) );
+	ENSURE( b3CreatePlayer( oldVersion, size, 1 ) == NULL );
+	ENSURE( b3ValidateReplay( oldVersion, size, 1 ) == false );
+
 	memcpy( oldVersion, data, (size_t)size );
 	uint32_t oldSnapshotVersion = 9;
 	memcpy( oldVersion + sizeof( b3RecHeader ) + sizeof( uint32_t ), &oldSnapshotVersion, sizeof( oldSnapshotVersion ) );
@@ -3696,14 +3709,8 @@ static int RecordingEventSectionValidation( void )
 		int width = ( i == 0 || i == 1 || i == 3 ) ? 1 : 4;
 		if ( i == 5 )
 		{
-			// Write a NaN in the actual position precision.
-			if ( sizeof( expected.begin[0].point.x ) == 8 )
-			{
-				uint64_t nan = UINT64_C( 0x7ff8000000000000 );
-				memcpy( data + section + offsets[i], &nan, 8 );
-			}
-			else
-				memcpy( data + section + offsets[i], values + i, 4 );
+			uint64_t nan = UINT64_C( 0x7ff8000000000000 );
+			memcpy( data + section + offsets[i], &nan, sizeof( nan ) );
 		}
 		else
 			memcpy( data + section + offsets[i], values + i, width );

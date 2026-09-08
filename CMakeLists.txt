@@ -90,7 +90,6 @@ endif()
 
 option(BOX3D_DISABLE_SIMD "Disable SIMD math (slower)" OFF)
 option(BOX3D_COMPILE_WARNING_AS_ERROR "Compile warnings as errors" OFF)
-option(BOX3D_DOUBLE_PRECISION "Enable double precision for large worlds" OFF)
 
 # These are read by the library build, so they must precede add_subdirectory(src),
 # otherwise the first configure and a re-configure produce different libraries.
@@ -145,9 +144,7 @@ if(PROJECT_IS_TOP_LEVEL)
 	option(BOX3D_BENCHMARKS "Build the Box3D benchmarks" OFF)
 	option(BOX3D_DOCS "Build the Box3D documentation" OFF)
 	option(BOX3D_UNIT_TESTS "Build the Box3D unit tests" ON)
-	if(BOX3D_DOUBLE_PRECISION)
-		add_subdirectory(abi)
-	endif()
+	add_subdirectory(abi)
 
 	# Enable this for shader development using sokol-shdc.
 	# This can be a large download, so this is disabled by default.

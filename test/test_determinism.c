@@ -15,9 +15,7 @@
 	#define TracyCFrameMark
 #endif
 
-// Double precision accumulates body positions in double, so the settle/sleep step and the
-// state hash differ from the float build. Both modes are internally deterministic.
-#if defined( BOX3D_DOUBLE_PRECISION )
+// Expected sleep steps and hashes for double precision world positions.
 #define RAGDOLL_SLEEP_STEP 297
 #define RAGDOLL_HASH 0xF4036C3A
 #define WAVE_PILE_SLEEP_STEP 297
@@ -28,18 +26,6 @@
 #define QUERY_SPAWN_QUERY_HASH 0x31F090DC
 #define MESH_DROP_SLEEP_STEP 251
 #define MESH_DROP_HASH 0x465381C5
-#else
-#define RAGDOLL_SLEEP_STEP 308
-#define RAGDOLL_HASH 0x4D94E049
-#define WAVE_PILE_SLEEP_STEP 273
-#define WAVE_PILE_HASH 0x0BA28F3A
-#define QUERY_SPAWN_SLEEP_STEP 242
-#define QUERY_SPAWN_HASH 0xB9F993A5
-#define QUERY_SPAWN_HIT_COUNT 59
-#define QUERY_SPAWN_QUERY_HASH 0xB9D3863D
-#define MESH_DROP_SLEEP_STEP 251
-#define MESH_DROP_HASH 0xE58C7240
-#endif
 
 static int SingleMultithreadingTest( int workerCount )
 {

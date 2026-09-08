@@ -14,7 +14,7 @@
 		<DisplayString>[ {v}, {s} ]</DisplayString>
 	</Type>
 
-	<!-- Distinct types only in BOX3D_DOUBLE_PRECISION builds; otherwise they alias b3Vec3 / b3Transform -->
+	<!-- World positions and transforms use double precision translation. -->
 	<Type Name="b3Pos">
 		<DisplayString>[ {x}, {y}, {z} ]</DisplayString>
 	</Type>

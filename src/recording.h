@@ -25,18 +25,10 @@ typedef struct v3BlockGridData v3BlockGridData;
 // when the body is far from the origin.
 static inline uint64_t b3FnvMixPosition( uint64_t hash, b3Pos p )
 {
-#if defined( BOX3D_DOUBLE_PRECISION )
 	uint64_t bx, by, bz;
 	memcpy( &bx, &p.x, 8 );
 	memcpy( &by, &p.y, 8 );
 	memcpy( &bz, &p.z, 8 );
-#else
-	uint32_t fx, fy, fz;
-	memcpy( &fx, &p.x, 4 );
-	memcpy( &fy, &p.y, 4 );
-	memcpy( &fz, &p.z, 4 );
-	uint64_t bx = fx, by = fy, bz = fz;
-#endif
 	hash = ( hash ^ bx ) * B3_SNAP_FNV_PRIME;
 	hash = ( hash ^ by ) * B3_SNAP_FNV_PRIME;
 	hash = ( hash ^ bz ) * B3_SNAP_FNV_PRIME;
@@ -247,7 +239,7 @@ void b3RecW_BOOL( b3RecBuffer* buf, bool v );
 void b3RecW_VEC3( b3RecBuffer* buf, b3Vec3 v );
 void b3RecW_QUAT( b3RecBuffer* buf, b3Quat v );
 void b3RecW_TRANSFORM( b3RecBuffer* buf, b3Transform v );
-// World position: doubles in large-world mode, floats otherwise (wire-identical to VEC3 in float build)
+// World positions are serialized as three doubles.
 void b3RecW_POSITION( b3RecBuffer* buf, b3Pos v );
 void b3RecW_WORLDXF( b3RecBuffer* buf, b3WorldTransform v );
 void b3RecW_MATRIX3( b3RecBuffer* buf, b3Matrix3 v );

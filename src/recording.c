@@ -142,18 +142,11 @@ void b3RecW_TRANSFORM( b3RecBuffer* buf, b3Transform v )
 }
 
 // World position at full precision so recordings reproduce the simulation far from the origin.
-// In the float build this is three floats, wire-identical to VEC3.
 void b3RecW_POSITION( b3RecBuffer* buf, b3Pos v )
 {
-#if defined( BOX3D_DOUBLE_PRECISION )
 	b3RecW_F64( buf, v.x );
 	b3RecW_F64( buf, v.y );
 	b3RecW_F64( buf, v.z );
-#else
-	b3RecW_F32( buf, v.x );
-	b3RecW_F32( buf, v.y );
-	b3RecW_F32( buf, v.z );
-#endif
 }
 
 void b3RecW_WORLDXF( b3RecBuffer* buf, b3WorldTransform v )
@@ -320,11 +313,10 @@ static void b3RecW_STR( b3RecBuffer* buf, const char* s )
 
 // Tripwire: each def serializer below is paired with a reader in recording_replay.c, and the two must
 // stay field-for-field in sync. Add a field to a def and the size changes, firing the matching assert
-// so the writer and reader both get updated. Only enforced on the 64-bit target; each def lists the
-// single-precision and double-precision sizes (equal for most), so either build configuration passes.
-_Static_assert( sizeof( void* ) != 8 || sizeof( b3ExplosionDef ) == 32 || sizeof( b3ExplosionDef ) == 48,
+// so the writer and reader both get updated. Only enforced on 64-bit targets.
+_Static_assert( sizeof( void* ) != 8 || sizeof( b3ExplosionDef ) == 48,
 				"b3ExplosionDef changed: update b3RecW_EXPLOSIONDEF and b3RecR_EXPLOSIONDEF together" );
-_Static_assert( sizeof( void* ) != 8 || sizeof( b3BodyDef ) == 112 || sizeof( b3BodyDef ) == 128,
+_Static_assert( sizeof( void* ) != 8 || sizeof( b3BodyDef ) == 128,
 				"b3BodyDef changed: update b3RecW_BODYDEF and b3RecR_BODYDEF together" );
 _Static_assert( sizeof( void* ) != 8 || sizeof( b3ShapeDef ) == 120,
 				"b3ShapeDef changed: update b3RecW_SHAPEDEF and b3RecR_SHAPEDEF together" );

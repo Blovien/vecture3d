@@ -195,7 +195,7 @@ static int TestRayAABBIntersection( void )
 
 // The narrow phase differences the two world positions in double then works in frame A, so a
 // manifold far from the origin must match the same manifold at the origin. Float loses this past
-// ~1e7 m where the ULP grows larger than the overlap, which is the whole point of large world mode.
+// ~1e7 m where the ULP grows larger than the overlap.
 static int LargeWorldManifoldTest( void )
 {
 	b3BoxHull boxA = b3MakeBoxHull( 0.5f, 0.5f, 0.5f );
@@ -220,7 +220,6 @@ static int LargeWorldManifoldTest( void )
 		ENSURE_SMALL( mOrigin.points[i].separation + 0.1f, 0.01f );
 	}
 
-#if defined( BOX3D_DOUBLE_PRECISION )
 	// Same relative configuration shifted far from the origin. The relative pose differences the
 	// world positions in double, so in double the frame A manifold is preserved to float precision.
 	// In float it would collapse since the offset is below the ULP.
@@ -246,14 +245,13 @@ static int LargeWorldManifoldTest( void )
 		ENSURE_SMALL( mLarge.points[i].point.y - mOrigin.points[i].point.y, 1e-4f );
 		ENSURE_SMALL( mLarge.points[i].point.z - mOrigin.points[i].point.z, 1e-4f );
 	}
-#endif
 
 	return 0;
 }
 
 // Broad-phase AABBs are built in double and narrowed to float with directed outward rounding, so a
-// shape and its speculative margin stay inside their box far from the origin. A float build would
-// round the extent away into the ULP (~1 m at 1e7) and clip the shape out of its own box.
+// shape and its speculative margin stay inside their box far from the origin. Rounding inward
+// would clip the shape out of its own box when the extent is below one float ULP.
 static int LargeWorldAABBTest( void )
 {
 	// Unit cube, so the tight extent is 0.5 each way
@@ -270,7 +268,6 @@ static int LargeWorldAABBTest( void )
 	ENSURE_SMALL( aabbOrigin.upperBound.y - 0.5f, FLT_EPSILON );
 	ENSURE_SMALL( aabbOrigin.upperBound.z - 0.5f, FLT_EPSILON );
 
-#if defined( BOX3D_DOUBLE_PRECISION )
 	double d = 1.0e7;
 	b3WorldTransform xfLarge = { { d, d, d }, b3Quat_identity };
 
@@ -293,7 +290,6 @@ static int LargeWorldAABBTest( void )
 	ENSURE( (double)fat.upperBound.x >= d + 0.5 + (double)extra );
 	ENSURE( (double)fat.upperBound.y >= d + 0.5 + (double)extra );
 	ENSURE( (double)fat.upperBound.z >= d + 0.5 + (double)extra );
-#endif
 
 	return 0;
 }

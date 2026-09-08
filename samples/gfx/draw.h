@@ -27,8 +27,7 @@ extern "C"
 // World space draw API. Every call takes absolute world coordinates and demotes against the
 // draw origin (set to the camera focus each frame, SetDrawOrigin) before handing float
 // coordinates to the renderer. The shift happens in double far from the origin, so the
-// overlay and impostor primitives only ever see small coordinates. Identity in float mode
-// where b3Pos aliases b3Vec3 and the origin is zero.
+// overlay and impostor primitives only ever see small coordinates.
 void SetDrawOrigin( b3Pos origin );
 
 // The draw origin the host and engine debug callbacks demote against (the camera focus).

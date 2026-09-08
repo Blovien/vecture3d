@@ -704,7 +704,6 @@ b3AABB b3ComputeShapeAABB( const b3Shape* shape, b3Transform transform )
 b3AABB b3ComputeFatShapeAABB( const b3Shape* shape, b3WorldTransform transform, float extra )
 {
 	b3Vec3 r = { extra, extra, extra };
-#if defined( BOX3D_DOUBLE_PRECISION )
 	// Build the box in the body local frame, inflate, then translate by the double origin and
 	// round outward. Inflating before the single rounding matters far from the origin where the
 	// float margin would otherwise vanish.
@@ -713,12 +712,6 @@ b3AABB b3ComputeFatShapeAABB( const b3Shape* shape, b3WorldTransform transform, 
 	localBox.lowerBound = b3Sub( localBox.lowerBound, r );
 	localBox.upperBound = b3Add( localBox.upperBound, r );
 	return b3OffsetAABB( localBox, transform.p );
-#else
-	b3AABB aabb = b3ComputeShapeAABB( shape, transform );
-	aabb.lowerBound = b3Sub( aabb.lowerBound, r );
-	aabb.upperBound = b3Add( aabb.upperBound, r );
-	return aabb;
-#endif
 }
 
 b3AABB b3ComputeSweptShapeAABB( const b3Shape* shape, const b3Sweep* sweep, float time )

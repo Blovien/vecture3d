@@ -1953,9 +1953,7 @@ int b3SerializeWorld( b3World* world, b3RecBuffer* buf, b3Recording* rec )
 	hdr.flags = B3_ENABLE_VALIDATION ? B3_SNAP_FLAG_VALIDATION : 0u;
 	hdr.materialPolicyKind = b3_contactMaterialPolicyBuiltin;
 	hdr.materialPolicyVersion = b3_contactMaterialPolicyBuiltinVersion;
-#if defined( BOX3D_DOUBLE_PRECISION )
 	hdr.flags |= B3_SNAP_FLAG_DOUBLE_PRECISION;
-#endif
 	b3SnapW_Bytes( buf, &hdr, (int)sizeof( hdr ) );
 
 	// World scalars
@@ -2086,13 +2084,7 @@ bool b3DeserializeIntoShell( const uint8_t* data, int size, b3World* world, b3Re
 		printf( "b3DeserializeIntoShell: unsupported flags\n" );
 		return false;
 	}
-	bool imageDouble = ( hdr.flags & B3_SNAP_FLAG_DOUBLE_PRECISION ) != 0;
-#if defined( BOX3D_DOUBLE_PRECISION )
-	bool buildDouble = true;
-#else
-	bool buildDouble = false;
-#endif
-	if ( imageDouble != buildDouble )
+	if ( ( hdr.flags & B3_SNAP_FLAG_DOUBLE_PRECISION ) == 0 )
 	{
 		printf( "b3DeserializeIntoShell: precision mismatch\n" );
 		return false;

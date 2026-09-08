@@ -64,15 +64,6 @@ jobs:
             os: macos-latest
             config: RelWithDebInfo
             test: ./bin/test
-          - name: ubuntu-gcc-double
-            os: ubuntu-latest
-            args: -DBOX3D_DOUBLE_PRECISION=ON
-            test: ./bin/test
-          - name: windows-double
-            os: windows-latest
-            msvc: true
-            args: -DBOX3D_DOUBLE_PRECISION=ON -DBOX3D_SANITIZE=ON
-            test: ./bin/Debug/test
     steps:
     - uses: actions/checkout@v6
 
@@ -171,10 +162,6 @@ jobs:
             os: windows-latest
             msvc: true
             args: -DBUILD_SHARED_LIBS=OFF
-          - name: samples-windows-double
-            os: windows-latest
-            msvc: true
-            args: -DBOX3D_DOUBLE_PRECISION=ON -DBUILD_SHARED_LIBS=OFF
           - name: samples-windows-dynamic
             os: windows-latest
             msvc: true

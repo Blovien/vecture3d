@@ -77,7 +77,6 @@ static int LargeWorldStackTest( void )
 	StackResult origin = RunStack( 0.0f );
 	ENSURE( origin.sleepStep >= 0 );
 
-#if defined( BOX3D_DOUBLE_PRECISION )
 	StackResult far = RunStack( 1.0e7f );
 	ENSURE( far.sleepStep >= 0 );
 
@@ -89,7 +88,6 @@ static int LargeWorldStackTest( void )
 		ENSURE_SMALL( far.relativePositions[i].y - origin.relativePositions[i].y, 1.0e-3f );
 		ENSURE_SMALL( far.relativePositions[i].z - origin.relativePositions[i].z, 1.0e-3f );
 	}
-#endif
 
 	return 0;
 }
@@ -144,10 +142,8 @@ static int LargeWorldBulletTest( void )
 	float originX = RunBullet( 0.0f );
 	ENSURE( originX < 5.0f );
 
-#if defined( BOX3D_DOUBLE_PRECISION )
 	float farX = RunBullet( 1.0e7f );
 	ENSURE( farX < 5.0f );
-#endif
 
 	return 0;
 }
@@ -274,7 +270,6 @@ static int LargeWorldQueryTest( void )
 	ENSURE( origin.shapeRayHit );
 	ENSURE_SMALL( origin.shapeRayRelX + 1.0f, 0.05f );
 
-#if defined( BOX3D_DOUBLE_PRECISION )
 	QueryResult far = RunQueries( 1.0e7f );
 	ENSURE( far.castHit );
 	ENSURE( far.overlapHit );
@@ -288,7 +283,6 @@ static int LargeWorldQueryTest( void )
 	ENSURE( far.planeCount == origin.planeCount );
 	ENSURE_SMALL( far.rayRelX - origin.rayRelX, 1.0e-3f );
 	ENSURE_SMALL( far.shapeRayRelX - origin.shapeRayRelX, 1.0e-3f );
-#endif
 
 	return 0;
 }

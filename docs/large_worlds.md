@@ -1,59 +1,33 @@
 # Large Worlds (Double Precision) {#large-worlds}
 
-Box3D can be built with double precision world positions for large worlds: simulations that range
-far from the origin, where a single precision float can no longer resolve a position. At a
-coordinate of 1e7 meters a float has a step of about one meter, so bodies snap to a coarse grid and
-contacts jitter. Double precision keeps full sub-millimeter resolution out to planetary distances.
+Vecture3D always uses double precision world positions. At a coordinate of 1e7 meters,
+a float has a step of about one meter, so it cannot retain small changes in absolute
+position. Double precision world coordinates preserve those changes.
 
-Only the world position boundary is double. Velocities, forces, shapes, contact manifolds, the
-contact solver, and the broad-phase tree all stay float. This is the same boundary design Jolt
-Physics uses for its big-world mode: doubles carry the absolute position, everything inside one
-body's frame stays float, and the per-step motion the solver integrates is small and meters-scale
-where float precision is ample. The cost is a few percent, not the 2x of an all-double build.
+Velocities, forces, local shapes, contact manifolds, solver calculations and the broad
+phase tree retain float precision. Positions are subtracted in double precision before
+local deltas are converted to floats.
 
-Double precision is **off by default**. With it off every double-precision type collapses to its
-float counterpart through a typedef and the boundary helpers reduce to plain float operations, so a
-float build behaves exactly as Box3D always has, with no measurable cost.
-
-This implementation is inspired by [Jolt](https://jrouwe.github.io/JoltPhysics/index.html#big-worlds).
-
-## Enabling it
-
-Set the CMake option:
-
-```cmake
-set(BOX3D_DOUBLE_PRECISION ON)
-```
-
-The define is propagated to consumers as a `PUBLIC` compile definition, so anything that links Box3D
-through CMake sees the same precision mode in the headers and cannot mismatch. For non-CMake
-consumers there is a link-time guard: a float application linked against a double-precision library
-(or the reverse) fails to link on the first Box3D call rather than miscompiling silently. At runtime
-`b3IsDoublePrecision()` reports which mode the library was built in, for bindings and diagnostics.
+There is no precision build option or required compiler definition. The public headers
+and library always use the same world position types. `b3IsDoublePrecision()` remains
+available for compatibility and always returns true. The existing
+`b3CreateWorldDoublePrecision` symbol is retained, including its `b3CreateWorld` alias,
+so applications cannot accidentally link these headers to an older float library.
 
 ## The two world-position types
 
-Double precision adds two types and leaves the existing math types alone:
+World coordinates use two distinct types:
 
-- `b3Pos` — a world position. Three doubles in large world mode, an alias for `b3Vec3`
-  otherwise.
-- `b3WorldTransform` — a world transform: a `b3Pos` translation and a float `b3Quat` rotation.
-  An alias for `b3Transform` otherwise.
+- `b3Pos` stores a world position as three doubles.
+- `b3WorldTransform` combines a `b3Pos` translation with a float `b3Quat` rotation.
 
-`b3Vec3`, `b3Quat`, `b3Transform`, and `b3AABB` stay float in both modes. `b3Transform` remains the
-type for local and relative frames; `b3WorldTransform` is used for world space. Rotations are float
-quaternions in both modes, so the trig and the cross-platform determinism properties are unchanged.
+`b3Vec3`, `b3Quat`, `b3Transform` and `b3AABB` retain float components.
+`b3Transform` describes local and relative frames. `b3WorldTransform` describes world
+space. Public body positions, world transforms, query origins and world hit points use
+the corresponding world types.
 
-The public API uses these types wherever it accepts or returns a world position: `b3BodyDef.position`,
-`b3Body_GetPosition` / `b3Body_GetTransform`, `b3Body_SetTransform`, `b3Body_GetWorldPoint` /
-`b3Body_GetLocalPoint`, `b3Body_GetWorldCenter`, the explosion and ray-cast origins, contact
-and ray-cast result points, and the body move event. With double precision off these are all the
-float types they have always been, so existing code compiles unchanged.
-
-With double precision **on**, `b3Pos` and `b3Vec3` are distinct structs by design. Code that
-passed a `b3Vec3` where a world position is now required no longer compiles, which is the intended
-cost: enabling large world mode is a deliberate source migration, and the compiler points at every
-site that needs a conversion. Helpers cover the boundary:
+`b3Pos` and `b3Vec3` are distinct structs. Callers converting between absolute positions
+and local vectors use these helpers:
 
 ```c
 b3Pos  p = b3ToPos( v );        // float vector -> world position
@@ -66,9 +40,9 @@ float      x = b3RoundDownFloat( p.x );  // conservative narrowing, pair with b3
 
 ## Operating range
 
-Full simulation correctness holds everywhere `b3Pos` can represent. Body integration, the
-contact solver, joints, and continuous collision all run in float relative to each body's own
-moving frame, so a stack settles and a bullet is caught the same way at 1e7 as at the origin.
+Body integration, contact solving, joints and continuous collision use local float
+calculations around double precision world positions. The large world tests compare
+stack settling, bullet collision and queries at the origin and at 1e7 meters.
 
 The practical limit comes from the broad phase, which stays float and stores conservative
 (outward-rounded) float bounds. Far from the origin the float bound quantization grows: about one
@@ -112,14 +86,13 @@ the Large World sample uses it to render a stack at 1e7 with no jitter.
 
 ## Determinism
 
-Both precision modes are internally deterministic and reproduce across worker counts. The numerics
-differ between modes — double precision accumulates body positions in double, so a body settles and
-sleeps on a slightly different step and the state hash differs — so a double-precision build is not
-bit-identical to a float build. The `DeterminismTest` carries a separate set of expected values for
-each mode.
+`DeterminismTest` checks the existing double precision sleep steps and state hashes
+across worker counts. Recordings retain the double precision wire format. Snapshot
+loading rejects records marked as single precision, as well as incompatible versions
+and layouts.
 
 ## SIMD
 
 Double precision is orthogonal to SIMD. The wide types used in the broad phase and mesh collision
-stay 4-wide float, and the contact solver is untouched in both modes. There is no double-precision
+stay 4-wide float, and the contact solver retains its float calculations. There is no double-precision
 SIMD path and none is needed: the hot interior never sees an absolute world coordinate.

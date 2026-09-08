@@ -98,7 +98,6 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "BUILD_SHARED_LIBS": "OFF",
-        "BOX3D_DOUBLE_PRECISION": "ON",
         "BOX3D_VALIDATE": "ON",
         "BOX3D_SAMPLES": "ON",
         "BOX3D_DOCS": "OFF",
