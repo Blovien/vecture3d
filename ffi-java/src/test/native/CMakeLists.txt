@@ -5,9 +5,9 @@ project(v3_java_test_fixtures LANGUAGES C)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
-add_library(vecture3d_mismatch SHARED v3_mismatch.c)
-add_library(vecture3d_null_world SHARED v3_null_world.c)
-target_include_directories(vecture3d_null_world PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../main/public")
+add_library(vecture3d_mismatch SHARED mismatch.c)
+add_library(vecture3d_null_world SHARED null_world.c)
+target_include_directories(vecture3d_null_world PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../../../abi/include")
 
 foreach(target vecture3d_mismatch vecture3d_null_world)
 	set_target_properties(${target} PROPERTIES

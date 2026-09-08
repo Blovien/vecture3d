@@ -224,37 +224,30 @@ typedef enum v3BlockGridReplaceStatus
 	v3_blockGridReplaceOutOfMemory,
 } v3BlockGridReplaceStatus;
 
-/// Publish a new cooked revision behind an existing BlockGrid shape.
+/// Publish a new cooked revision for an existing BlockGrid shape.
 ///
-/// The caller cooks the new revision with v3CookBlockGrid, which never touches a
-/// world, and calls this with the world unlocked; it must serialize this call with
-/// every other operation on that world, exactly as attachment requires.
+/// Cook the new revision with v3CookBlockGrid and call this with the world unlocked.
+/// The caller must serialize this call with every other operation on the world.
 ///
-/// The shape identifier survives, so every handle the application already holds
-/// stays valid, and so does every b3ShapeDef property the shape was created with:
-/// user data, filter, density, explosion scale, name, and the event flags. Only the
-/// geometry and what is derived from it change.
+/// The shape identifier and its b3ShapeDef properties remain unchanged: user data,
+/// filter, density, explosion scale, name, and event flags. Geometry and properties
+/// computed from it are updated.
 ///
-/// One publication means the swap and everything it invalidates happen inside a
-/// single locked section, so no step and no query can observe a half-updated shape:
-/// the shape takes its own reference on data, the previous revision's shape-held
-/// reference is dropped, the shape's material table is rebuilt from the new
-/// revision, the broad-phase proxy is recreated at the new bounds, every contact
-/// touching the shape is destroyed so contacts on removed blocks end, the body's
-/// mass data is recomputed when updateBodyMass is true, and the body is woken.
-/// Contacts on blocks the new revision kept are recreated by the next step, with a
-/// rebuilt warm start rather than a carried one. Republishing the revision the shape
-/// already holds is a full publication with the same effects, not a no-op: contacts
-/// are destroyed and rebuilt, the proxy is recreated, and the counter is incremented.
+/// During mutation the world is marked locked. The shape retains data and releases
+/// its reference to the previous revision. Its material table and broad-phase proxy
+/// are rebuilt. Old contact lifetimes end, invalidating their contact identifiers.
+/// Aggregate contact slots and allocation capacity may be retained, but their
+/// manifolds, impulses, and block identities are cleared. The next step rebuilds
+/// contact geometry. The body's mass data is recomputed when updateBodyMass is true,
+/// and the body is woken.
 ///
-/// A failure changes nothing at all. The previous revision stays attached and fully
-/// usable, the caller keeps its own reference on data, and stepping continues
-/// exactly as it would have without the call.
+/// Republishing the current revision has the same effects, including resetting
+/// contacts, recreating the proxy, and incrementing the replacement counter.
+/// A failure leaves the attached revision and world state unchanged.
 ///
-/// The caller must keep data alive for the duration of this call. On success the
-/// shape holds its own reference, so the caller may release its cooking handle with
-/// v3DestroyBlockGridData as soon as the call returns; the cooked bytes are freed
-/// once the last reference, from any shape or world, is gone.
+/// The caller must keep data alive for this call. On success, the shape holds its
+/// own reference, so the caller may release the cooking handle with v3DestroyBlockGridData.
+/// The cooked bytes are freed when the last reference from any shape or world is released.
 B3_API v3BlockGridReplaceStatus v3ReplaceBlockGridShape( b3ShapeId shapeId, v3BlockGridData* data, bool updateBodyMass );
 
 /// Return contact events involving a BlockGrid. Logical cells are expressed in

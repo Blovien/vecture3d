@@ -131,7 +131,9 @@ public final class V3World implements AutoCloseable {
         applyBodyPlan(plan);
     }
 
-    /** Creates a sphere centered at the body origin, with the ordinary body identity and lifetime. */
+    /**
+     * Creates a sphere centered at the body origin.
+     */
     public V3BodyHandle createSphereBody(V3BodyDefinition body, float radius, float density, float friction) {
         requireOpenOwner();
         Objects.requireNonNull(body, "body");
@@ -189,10 +191,9 @@ public final class V3World implements AutoCloseable {
     /**
      * Creates a body from the definition and attaches cooked BlockGrid geometry to it.
      *
-     * <p>The shape takes its own reference on the cooked data, so the caller may close the handle as
-     * soon as this returns. A non-null mass override installs explicit mass data on the new body; a
-     * null override leaves the mass Box3D derives from the geometry. The returned handle is an
-     * ordinary body handle that every other body operation addresses.
+     * <p>The shape retains the cooked data, so the caller may close the cooking handle after success.
+     * A non-null mass override installs explicit mass data on the new body. A null override uses
+     * mass derived from the geometry.
      */
     public V3BodyHandle attachBlockGrid(V3BodyDefinition body, V3CookedGrid grid) {
         return attachBlockGrid(body, grid, null);
@@ -235,9 +236,10 @@ public final class V3World implements AutoCloseable {
     /**
      * Replaces an attached BlockGrid while preserving the body handle and pose.
      *
-     * <p>The shape retains the new geometry, so the caller may close grid after success. Mass derived
-     * from geometry is recomputed using the existing shape density; explicit mass overrides remain
-     * unchanged. If the center of mass moves, native rotation may adjust its linear velocity.
+     * <p>The shape retains the new geometry, so the caller may close grid after success.
+     * Mass derived from geometry is recomputed using the existing shape density. If the derived
+     * center of mass moves, linear velocity is adjusted by angular velocity crossed with the
+     * center displacement in world coordinates. Explicit mass overrides remain unchanged.
      * Contacts rebuild, so retained cells may emit end and begin events. A rejected call leaves
      * the geometry and body registry unchanged.
      */

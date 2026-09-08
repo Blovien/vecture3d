@@ -84,8 +84,7 @@ class V3WorldLimitsTest {
         assertThrows(IllegalArgumentException.class, () -> new V3WorldLimits(0.0f, 0.0f, -1));
     }
 
-    // A BlockGrid body cannot be attached from Java until the BlockGrid ABI slice lands, so the clamp
-    // is observed on a hull body; it is a world property and does not depend on the shape.
+    // The angular clamp is a world setting, so this test observes it on a hull body.
     private static V3Transform spinOneStep(V3World world, long logicalId) {
         V3BoxBodyCommand body = V3TestSupport.box(
             logicalId,

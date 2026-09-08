@@ -3,8 +3,8 @@
 
 #include "manifold.h"
 #include "test_macros.h"
-#include "v3_separation_certifier.h"
-#include "v3_witness_point.h"
+#include "block_grid/separation_certifier.h"
+#include "block_grid/witness_point.h"
 
 #include "box3d/collision.h"
 #include "box3d/constants.h"

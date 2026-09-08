@@ -164,14 +164,9 @@ typedef struct b3WorldDef
 	float contactSpeed;
 
 	/// Maximum linear speed. Usually meters per second.
-	/// @warning Motion is resolved at step boundaries. A body allowed to travel more than about one
-	/// cell per step can pass clean through one-cell-thick geometry, because the step that carries it
-	/// across leaves no overlap for the solver to see. One cell per step is the safe bound: sub-stepping
-	/// and speculative margin buy some room above it, and measured against a one-cell-thick BlockGrid
-	/// wall with four sub-steps a BlockGrid hull still stops at two cells per step and passes clean
-	/// through at three, but that margin is a property of the scene and not a guarantee. Bound this with
-	/// the smallest cell size the game builds from divided by the step length; the game owns the trade
-	/// between reach and speed.
+	/// @warning A speed limit alone does not guarantee collision safety. BlockGrid speculative admission
+	/// predicts free motion over the current step. Later contact or joint impulses can change that motion,
+	/// and rotational paths are not certified. Test the chosen speeds and timestep against the game's geometry.
 	float maximumLinearSpeed;
 
 	/// Maximum angular speed. Radians per second. Zero selects the Box3D default, which is the

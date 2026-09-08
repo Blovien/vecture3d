@@ -42,7 +42,9 @@ public record V3StepStats(
     private static final int MAX_JOINTS = 4_096;
     private static final int MAX_QUERIES = 1_024;
 
-    /** Existing construction defaults the appended event fields to zero. */
+    /**
+     * Initializes contact event counts to zero and truncation to false.
+     */
     public V3StepStats(
         int outputCount,
         int bodyCount,

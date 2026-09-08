@@ -1,13 +1,11 @@
 package dev.hytalemodding.vecture3d.ffi;
 
 /**
- * One BlockGrid surface material.
+ * One BlockGrid surface material. Box3D uses friction, restitution, and the full 64-bit material ID.
  *
- * <p>Friction, restitution and the material ID reach Box3D; the material ID is 64 bits wide on both
- * sides, so nothing is truncated. Box3D takes density per shape rather than per material, so the
- * cook uses the density of material zero for every shape the cooked data backs when that density is
- * positive and 1.0 otherwise, and ignores the density of every other material. Bond strength,
- * compressive factor and flags are accepted and ignored, reserved for fracture.
+ * <p>Shape density comes from material zero: its density is used when positive, otherwise 1.0 is used.
+ * Other materials' densities are ignored. Bond strength, compressive factor, and flags are reserved
+ * for fracture and currently ignored.
  */
 public record V3BlockMaterial(
     long materialId,
@@ -33,7 +31,9 @@ public record V3BlockMaterial(
         }
     }
 
-    /** A material with no fracture properties, which this slice reserves and ignores. */
+    /**
+     * Creates a material with fracture properties and flags set to zero.
+     */
     public static V3BlockMaterial of(long materialId, float density, float friction, float restitution) {
         return new V3BlockMaterial(materialId, density, friction, restitution, 0.0f, 0.0f, 0);
     }

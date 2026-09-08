@@ -146,7 +146,7 @@ if(PROJECT_IS_TOP_LEVEL)
 	option(BOX3D_DOCS "Build the Box3D documentation" OFF)
 	option(BOX3D_UNIT_TESTS "Build the Box3D unit tests" ON)
 	if(BOX3D_DOUBLE_PRECISION)
-		add_subdirectory(v3)
+		add_subdirectory(abi)
 	endif()
 
 	# Enable this for shader development using sokol-shdc.

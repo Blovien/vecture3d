@@ -27,7 +27,7 @@ public final class V3NativeLibrary {
     }
 
     /**
-     * Loads one global Vecture3D library process before generated bindings are initialized
+     * Loads the native library once per process, before generated bindings initialize.
      */
     public static V3NativeLibrary load(Path path) {
         Path realPath = validatePath(path);
@@ -46,7 +46,7 @@ public final class V3NativeLibrary {
                 return loadedLibrary;
             }
             if (loadedLibrary != null) {
-                throw new IllegalStateException("Vecture3D process admission state is invalid");
+                throw new IllegalStateException("Vecture3D native library load state is inconsistent");
             }
 
             // NOTE: Jextract resolves loader symbols when its generated classes initialize

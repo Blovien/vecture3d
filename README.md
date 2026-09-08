@@ -9,6 +9,19 @@ Vecture3D is a fork of Box3D physics engine designed and optimized for Hytale Se
 
 [![Introducing Box3D](https://img.youtube.com/vi/jr_Fzl2XwKU/maxresdefault.jpg)](https://www.youtube.com/watch?v=jr_Fzl2XwKU)
 
+## Source layout
+
+- `include/vecture3d/`: public engine extensions.
+- `src/block_grid/`: BlockGrid implementation, private headers, and collision certification helpers.
+- `abi/include/vecture3d/`: public native ABI headers.
+- `abi/src/`: ABI implementation and private headers.
+- `abi/test/`: native ABI tests.
+- `abi/abi_manifest.json`: generated ABI contract, refreshed with `./gradlew updateAbiManifest`.
+- `ffi-java/`: Java FFM bindings and consumer tests.
+
+The ABI follows Box3D’s `include/` and `src/` convention. Native filenames omit
+the `v3_` prefix. Exported symbols and Java API names retain their existing names.
+
 ## Features
 
 ### Collision

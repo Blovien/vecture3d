@@ -13,8 +13,8 @@
 #include "shape.h"
 #include "solver_set.h"
 #include "table.h"
-#include "v3_block_grid.h"
-#include "v3_block_grid_shape.h"
+#include "block_grid/block_grid.h"
+#include "block_grid/block_grid_shape.h"
 
 #include "box3d/box3d.h"
 
@@ -196,7 +196,7 @@ void b3InitializeContactRegisters( void )
 		b3AddType( v3_blockGridShape, b3_capsuleShape );
 		b3AddType( v3_blockGridShape, b3_hullShape );
 
-		// Grid pairs stay behind the status-reporting step gate until the aggregate path is ready for ordinary registration
+		// BlockGrid pairs bypass this registration table. createBlockGridPairs controls their creation.
 		s_initialized = true;
 	}
 }
@@ -1023,9 +1023,7 @@ b3ContactUpdateResult b3UpdateContact( b3World* world, int workerIndex, b3Contac
 
 	if ( shapeA->type == v3_blockGridShape )
 	{
-		// One contact is one hitbox. Resolve it into a stack-local box hull and
-		// run the ordinary convex manifold, so warm starting, events, and the
-		// solver path behave the same as they do for a compound child.
+		// Resolve the contact hitbox into a temporary box hull and run the convex manifold function.
 		int hitboxIndex = contact->childIndex;
 		b3BoxHull box = v3MakeBlockGridHitboxHull( shapeA->blockGrid, hitboxIndex );
 

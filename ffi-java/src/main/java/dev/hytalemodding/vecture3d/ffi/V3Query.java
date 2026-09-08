@@ -23,7 +23,9 @@ public record V3Query(
 ) {
     private static final long ALL_BODY_CATEGORIES = 7L;
 
-    /** Preserves the original static obstacle box query. */
+    /**
+     * Creates a legacy box query against static obstacles.
+     */
     public V3Query(
         long queryId,
         double originX,

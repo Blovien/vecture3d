@@ -81,8 +81,7 @@ B3_REC_OP( 0x43, CreateMeshShape, RET_SHAPEID, ARG( BODYID, body ) ARG( SHAPEDEF
 B3_REC_OP( 0x44, CreateHeightFieldShape, RET_SHAPEID, ARG( BODYID, body ) ARG( SHAPEDEF, def ) ARG( GEOMID, geometryId ) )
 B3_REC_OP( 0x45, CreateCompoundShape, RET_SHAPEID, ARG( BODYID, body ) ARG( SHAPEDEF, def ) ARG( GEOMID, geometryId ) )
 B3_REC_OP( 0x46, DestroyShape, RET_NONE, ARG( SHAPEID, shape ) ARG( BOOL, updateBodyMass ) )
-// Placement travels with the op because interning zeroes it out of the payload:
-// two placements of one assembly share a geometry slot by design.
+// Store placement with the operation because interned geometry has its placement fields zeroed.
 B3_REC_OP( 0x47, CreateBlockGridShape, RET_SHAPEID,
 		   ARG( BODYID, body ) ARG( SHAPEDEF, def ) ARG( GEOMID, geometryId ) ARG( I32, originX ) ARG( I32, originY )
 			   ARG( I32, originZ ) ARG( I32, placement ) )
@@ -104,8 +103,7 @@ B3_REC_OP( 0x5C, ShapeSetName, RET_NONE, ARG( SHAPEID, shape ) ARG( STR, name ) 
 B3_REC_OP( 0x5D, ShapeSetMeshMaterial, RET_NONE, ARG( SHAPEID, shape ) ARG( MATERIAL, material ) ARG( I32, index ) )
 B3_REC_OP( 0x5E, ShapeSetHull, RET_NONE, ARG( SHAPEID, shape ) ARG( GEOMID, geometryId ) )
 B3_REC_OP( 0x5F, ShapeSetMesh, RET_NONE, ARG( SHAPEID, shape ) ARG( GEOMID, geometryId ) ARG( VEC3, scale ) )
-// Placement travels with the op for the same reason it does on creation: interning
-// zeroes it out of the payload so two placements share one geometry slot.
+// Store placement with the operation because interned geometry has its placement fields zeroed.
 B3_REC_OP( 0x60, ReplaceBlockGridShape, RET_NONE,
 		   ARG( SHAPEID, shape ) ARG( GEOMID, geometryId ) ARG( I32, originX ) ARG( I32, originY ) ARG( I32, originZ )
 			   ARG( I32, placement ) ARG( BOOL, updateBodyMass ) )

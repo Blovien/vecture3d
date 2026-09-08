@@ -10,35 +10,35 @@ set(BOX3D_SOURCE_FILES
 	bitset.h
 	block_allocator.c
 	block_allocator.h
-	v3_block_grid.c
-	v3_block_grid_cook.c
-	v3_block_grid_contact.c
-	v3_block_grid_contact.h
-	v3_block_grid_events.c
-	v3_block_grid_events.h
-	v3_block_grid.h
-	v3_block_grid_internal.h
-	v3_block_grid_pair.c
-	v3_block_grid_pair_narrow.c
-	v3_block_grid_pair_reduce.c
-	v3_block_grid_pair_update.c
-	v3_block_grid_pair_update.h
-	v3_block_grid_pair_world.c
-	v3_block_grid_pair_world.h
-	v3_block_grid_pair.h
-	v3_block_grid_public.c
-	v3_block_grid_query.c
-	v3_block_grid_shape.c
-	v3_block_grid_shape.h
-	v3_interval.h
-	v3_obb_interval_sat.c
-	v3_obb_interval_sat.h
-	v3_separation_certifier.c
-	v3_separation_certifier.h
-	v3_sweep_interval.c
-	v3_sweep_interval.h
-	v3_witness_point.c
-	v3_witness_point.h
+	block_grid/block_grid.c
+	block_grid/block_grid_cook.c
+	block_grid/block_grid_contact.c
+	block_grid/block_grid_contact.h
+	block_grid/block_grid_events.c
+	block_grid/block_grid_events.h
+	block_grid/block_grid.h
+	block_grid/block_grid_internal.h
+	block_grid/block_grid_pair.c
+	block_grid/block_grid_pair_narrow.c
+	block_grid/block_grid_pair_reduce.c
+	block_grid/block_grid_pair_update.c
+	block_grid/block_grid_pair_update.h
+	block_grid/block_grid_pair_world.c
+	block_grid/block_grid_pair_world.h
+	block_grid/block_grid_pair.h
+	block_grid/block_grid_public.c
+	block_grid/block_grid_query.c
+	block_grid/block_grid_shape.c
+	block_grid/block_grid_shape.h
+	block_grid/interval.h
+	block_grid/obb_interval_sat.c
+	block_grid/obb_interval_sat.h
+	block_grid/separation_certifier.c
+	block_grid/separation_certifier.h
+	block_grid/sweep_interval.c
+	block_grid/sweep_interval.h
+	block_grid/witness_point.c
+	block_grid/witness_point.h
 	body.c
 	body.h
 	broad_phase.c

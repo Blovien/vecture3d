@@ -11,8 +11,8 @@
 #include "core.h"
 #include "id_pool.h"
 #include "name_cache.h"
-#include "v3_block_grid_events.h"
-#include "v3_block_grid_shape.h"
+#include "block_grid/block_grid_events.h"
+#include "block_grid/block_grid_shape.h"
 
 #include "box3d/types.h"
 
@@ -155,9 +155,8 @@ typedef struct b3World
 	// Published unchanged by v3World_GetBlockGridPairCounters after every step
 	v3BlockGridPairCounters blockGridPairCounters;
 
-	// BlockGrid revisions published since the last step. The pair pass rebuilds the
-	// counters from zero every step, so a replacement between two steps parks its
-	// count here and the next step's rebuild moves it into the published struct.
+	// Accumulates BlockGrid replacements between steps. The next pair pass adds
+	// this count to the published counters and clears it.
 	uint64_t blockGridReplacementPendingCount;
 
 	// The body id pool is used to allocate and recycle body ids. Body ids

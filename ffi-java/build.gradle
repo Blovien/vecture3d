@@ -59,7 +59,7 @@ def buildNativeFixtures = tasks.register('buildNativeFixtures', Exec) {
     dependsOn configureNativeFixtures
     inputs.files(
         fileTree('src/test/native') { include '*.c' },
-        fileTree('src/main/public') { include '*.h' }
+        fileTree(rootProject.file('abi/include')) { include '**/*.h' }
     )
     outputs.files(mismatchLibraryFile, nullWorldLibraryFile)
     commandLine 'cmake', '--build', nativeFixtureBuildDirectory.get().asFile.absolutePath, '--parallel', '2'
@@ -118,7 +118,7 @@ tasks.register('verifyPublishedConsumer', Exec) { Exec consumerVerification ->
 
 jextract.libraries {
     def v3 = register('v3') {
-        header = layout.projectDirectory.file('src/main/public/v3_abi.h')
+        header = rootProject.layout.projectDirectory.file('abi/include/vecture3d/abi.h')
         headerClassName = 'V3Abi'
         targetPackage = 'dev.hytalemodding.vecture3d.ffi.generated'
     }

@@ -12,8 +12,8 @@
 #include "contact.h"
 #include "physics_world.h"
 #include "platform.h"
-#include "v3_block_grid_contact.h"
-#include "v3_block_grid_internal.h"
+#include "block_grid/block_grid_contact.h"
+#include "block_grid/block_grid_internal.h"
 #include "world_snapshot.h"
 
 #include "box3d/box3d.h"
@@ -1209,9 +1209,8 @@ uint32_t b3RecInternBlockGrid( b3Recording* rec, const v3BlockGridData* grid )
 	uint8_t* bytes = b3Alloc( (size_t)byteCount );
 	memcpy( bytes, grid, (size_t)byteCount );
 
-	// Normalize the mutable trailer. Ownership and placement are not content, so
-	// zeroing them lets two placements of one assembly share a slot and keeps a
-	// live reference count out of the durable bytes.
+	// Zero the mutable header fields so identical geometry at different placements
+	// shares a registry slot and the stored bytes contain no live reference count.
 	v3BlockGridData* copy = (v3BlockGridData*)bytes;
 	b3AtomicStoreInt( &copy->referenceCount, 0 );
 	copy->worldOriginX = 0;

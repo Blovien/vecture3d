@@ -19,8 +19,8 @@
 #include "sensor.h"
 #include "shape.h"
 #include "solver_set.h"
-#include "v3_block_grid_contact.h"
-#include "v3_block_grid_events.h"
+#include "block_grid/block_grid_contact.h"
+#include "block_grid/block_grid_events.h"
 
 #include <float.h>
 #include <limits.h>
@@ -413,8 +413,7 @@ static bool b3ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 		return true;
 	}
 
-	// The deferred pass exists for moving BlockGrids alone, so anything else the
-	// kinematic and dynamic trees hand it is not its business.
+	// The deferred pass processes moving BlockGrid targets only.
 	if ( continuousContext->scope == b3_continuousMovingBlockGrids && shape->type != v3_blockGridShape )
 	{
 		return true;
@@ -478,10 +477,9 @@ static bool b3ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 
 	if ( sweepResult.capExhausted )
 	{
-		// The cap left this sweep without an answer, so the fast body holds at the
-		// accepted fraction with its velocity untouched rather than accept an impact
-		// that may sit past a Hitbox nothing looked at. A hold is not a contact, so no
-		// pre-solve event and no sensor hit come out of it.
+		// The candidate cap leaves a possible collision unresolved. Hold the fast body
+		// at the accepted fraction with unchanged velocity. A hold creates no contact,
+		// pre-solve event, or sensor hit.
 		taskContext->blockGridCapExhaustionCount += 1;
 		if ( sweepResult.holdFraction < continuousContext->holdFraction )
 		{
@@ -618,11 +616,9 @@ static void b3SolveContinuous( b3World* world, int bodySimIndex, b3TaskContext* 
 		// Store this to avoid double computation in the case there is no impact event
 		fastShape->aabb = box2;
 
-		// Concave containers are swept against rather than swept, because the
-		// path below builds a single proxy for whichever shape is moving and a
-		// grid is a field of hitboxes with no single proxy to build. A dynamic
-		// grid travelling fast enough to want this leans on the discrete path
-		// and its fat AABB margins instead.
+		// This sweep requires a single convex proxy for the moving shape. BlockGrids
+		// and other concave containers can be targets here, but cannot supply that proxy.
+		// Fast moving grids use discrete contacts and expanded AABB bounds.
 		if ( fastShape->type == b3_meshShape || fastShape->type == b3_heightShape || fastShape->type == b3_compoundShape ||
 			 fastShape->type == v3_blockGridShape )
 		{
@@ -648,9 +644,8 @@ static void b3SolveContinuous( b3World* world, int bodySimIndex, b3TaskContext* 
 		}
 	}
 
-	// A hold beats an impact it precedes: nothing looked at what sits between them, so
-	// the body may not pass the hold. A zero hold leaves the body exactly where it
-	// started, which the impact branch below reproduces by interpolating at zero.
+	// Stop at the hold fraction if it precedes the impact, because an earlier collision
+	// has not been ruled out. Interpolating at a zero hold preserves the starting pose.
 	bool held = context.holdFraction < context.fraction;
 	if ( held )
 	{
@@ -1553,21 +1548,14 @@ static int b3CompareDeferredGridSweeps( const void* a, const void* b )
 	return left->bodySimIndex < right->bodySimIndex ? -1 : ( left->bodySimIndex > right->bodySimIndex ? 1 : 0 );
 }
 
-// Fast non-bullet bodies sweeping the BlockGrids on kinematic and dynamic bodies.
+// Sweeps fast non-bullet bodies against BlockGrids on kinematic and dynamic bodies.
 //
-// The finalize task cannot do this: it runs in parallel with those bodies writing
-// their own center0 and rotation0, which is exactly what a sweep against them reads.
-// Here every anchor in the world is settled, so the sweep is stable. The pass reruns
-// the body's own sweep from the pose it held before finalize advanced it, so an
-// impact found here composes with the static impact found there rather than
-// replacing it. It accepts BlockGrid shapes only; everything else on those two trees
-// is out of scope for this ticket and keeps the behaviour it has today.
+// Run after finalize, when every target's center0 and rotation0 have been written.
+// Repeat the source body's sweep from its pose before finalize so any moving-grid
+// impact is combined with the static impact already found.
 //
-// It runs on one worker rather than in parallel. A fast non-bullet body that carries a
-// BlockGrid of its own is both a sweeper and something another entry sweeps against, and
-// in parallel one entry would read the anchors another is writing. The pass is short, it
-// only runs for fast non-bullet bodies in a world that has a BlockGrid at all, and alpha
-// runs one physics worker regardless.
+// Run serially because a body carrying a BlockGrid can be both a sweep source and
+// a target. Parallel processing could read anchors while another worker changes them.
 static void b3SolveDeferredGridSweeps( b3World* world, b3StepContext* stepContext, int count )
 {
 	b3TracyCZoneNC( deferred_grid_task, "Deferred Grid Sweep", b3_colorLightSkyBlue, true );

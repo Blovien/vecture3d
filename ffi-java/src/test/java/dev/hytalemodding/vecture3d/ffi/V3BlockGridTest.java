@@ -121,7 +121,7 @@ class V3BlockGridTest {
             assertTrue(result.stats().blockGridContactCount() > 0);
             assertTrue(result.stats().blockGridCandidateHitboxPairCount() >= result.stats().blockGridTouchingPairCount());
             assertTrue(result.stats().blockGridScratchPeakBytes() > 0);
-            // Reserved until Projectile configuration and replacement reach the bridge.
+            // This fixture performs no projectile sweeps or grid replacements, so these counts are zero.
             assertEquals(0, result.stats().blockGridProjectileSweepCount());
             assertEquals(0, result.stats().blockGridCapExhaustionCount());
             assertEquals(0, result.stats().blockGridReplacementPublishedCount());

@@ -1,9 +1,5 @@
 build/
-
-# Out-of-tree CMake build directories, which accumulate one per configuration
-# once you keep a release, a debug-with-validation and a samples build side by
-# side. Listing them individually meant every new configuration leaked into
-# git status until someone noticed.
+build/v3-release/
 build-*/
 
 .gradle/
@@ -21,7 +17,6 @@ CMakeUserPresets.json
 .fetchcontent-cache/
 *.b3rec
 Superluminal/
-build/v3-release/
 
 # Generated project reports and screenshots
 /docs/research/

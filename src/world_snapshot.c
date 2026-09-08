@@ -25,10 +25,10 @@
 #include "shape.h"
 #include "solver_set.h"
 #include "table.h"
-#include "v3_block_grid.h"
-#include "v3_block_grid_contact.h"
-#include "v3_block_grid_internal.h"
-#include "v3_block_grid_pair.h"
+#include "block_grid/block_grid.h"
+#include "block_grid/block_grid_contact.h"
+#include "block_grid/block_grid_internal.h"
+#include "block_grid/block_grid_pair.h"
 
 #include "box3d/box3d.h"
 #include "box3d/collision.h"
@@ -801,11 +801,8 @@ static void b3SerShapes( b3RecBuffer* buf, b3World* world, b3Recording* rec )
 				uint32_t gid = b3RecInternBlockGrid( rec, src->blockGrid );
 				b3SnapW_U32( buf, gid );
 
-				// Because the registry zeroes origin and placement so that two
-				// placements of one assembly can share a slot, which is what
-				// keeps the content hash placement-independent, the trailer
-				// never appears in the interned bytes and has to travel with
-				// the shape instead.
+				// Store placement with the shape. The geometry registry zeroes the
+				// mutable header fields so identical geometry shares a slot.
 				b3SnapW_I32( buf, src->blockGrid->worldOriginX );
 				b3SnapW_I32( buf, src->blockGrid->worldOriginY );
 				b3SnapW_I32( buf, src->blockGrid->worldOriginZ );
@@ -1017,7 +1014,7 @@ static void b3DesShapes( b3SnapReader* r, b3World* world, b3RecReader* rdr )
 					break;
 				}
 
-				// Placement rides with the shape, not with the interned bytes.
+				// Restore placement from the shape record.
 				int originX = b3SnapR_I32( r );
 				int originY = b3SnapR_I32( r );
 				int originZ = b3SnapR_I32( r );

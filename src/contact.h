@@ -5,7 +5,7 @@
 
 #include "arena_allocator.h"
 #include "container.h"
-#include "v3_block_grid_contact.h"
+#include "block_grid/block_grid_contact.h"
 
 #include "box3d/collision.h"
 #include "box3d/types.h"

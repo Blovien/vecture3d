@@ -12,7 +12,7 @@
 #include "platform.h"
 #include "simd.h"
 #include "solver_set.h"
-#include "v3_block_grid_contact.h"
+#include "block_grid/block_grid_contact.h"
 
 #if B3_ENABLE_VALIDATION
 #include "shape.h"
@@ -29,7 +29,7 @@
 
 static b3ContactMaterial b3GetScalarManifoldMaterial( const b3Contact* contact, int manifoldIndex )
 {
-	// Ordinary scalar contacts repeat the parent material, while an aggregate selects one per manifold
+	// Aggregate contacts resolve material per manifold. Other contacts use the parent material.
 	if ( contact->kind != v3_blockGridPairContactKind )
 	{
 		return (b3ContactMaterial){

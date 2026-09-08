@@ -9,7 +9,7 @@
 #include "physics_world.h"
 #include "recording.h"
 #include "test_macros.h"
-#include "v3_block_grid_contact.h"
+#include "block_grid/block_grid_contact.h"
 #include "vecture3d/block_grid.h"
 
 #include "box3d/box3d.h"
@@ -2309,9 +2309,8 @@ static uint64_t RunBlockGridReplaceScene( b3Recording* rec, bool replace, v3Bloc
 	return hash;
 }
 
-// Publishing a new BlockGrid revision is a world mutation like a hull or mesh swap and has to ride
-// the stream, with the new geometry interned at the record site. The control run proves the
-// replacement moves the simulation, so the replay gate has teeth.
+// Record BlockGrid replacement with its interned geometry. The control run verifies
+// that replacement changes the simulation, and replay must reproduce that change.
 static int BlockGridReplaceReplay( void )
 {
 	v3BlockGridData* wideTerrain = CookReplaySlab( 6, 6 );
@@ -2325,7 +2324,7 @@ static int BlockGridReplaceReplay( void )
 	ENSURE( rec != NULL );
 	uint64_t replacedHash = RunBlockGridReplaceScene( rec, true, wideTerrain, narrowTerrain, ship );
 
-	// Without this the replay gate below could pass on a recording that never carried the op.
+	// Verify that replacement changes the result so replay cannot pass with the operation missing.
 	ENSURE( replacedHash != controlHash );
 
 	const uint8_t* data = b3Recording_GetData( rec );

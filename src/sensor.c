@@ -8,7 +8,7 @@
 #include "ctz.h"
 #include "physics_world.h"
 #include "shape.h"
-#include "v3_block_grid_shape.h"
+#include "block_grid/block_grid_shape.h"
 
 #include "box3d/collision.h"
 

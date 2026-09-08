@@ -4,7 +4,7 @@
 #pragma once
 
 #include "math_internal.h"
-#include "v3_block_grid_shape.h"
+#include "block_grid/block_grid_shape.h"
 
 #include "box3d/types.h"
 

@@ -3,11 +3,8 @@ package dev.hytalemodding.vecture3d.ffi;
 import java.util.Objects;
 
 /**
- * Pose, velocity and damping for BlockGrid and sphere body creation.
- *
- * <p>The handle carries the logical identity and generation the new body takes, in the same scheme
- * as every other body operation, so removals, wrenches, kinematic targets and queries address it
- * afterwards.
+ * Pose, velocity, and damping for BlockGrid and sphere body creation.
+ * The handle supplies the new body's logical ID and generation.
  */
 public record V3BodyDefinition(
     V3BodyHandle handle,

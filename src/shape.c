@@ -13,9 +13,9 @@
 // needed for dll export
 #include "aabb.h"
 #include "compound.h"
-#include "v3_block_grid.h"
-#include "v3_block_grid_events.h"
-#include "v3_block_grid_shape.h"
+#include "block_grid/block_grid.h"
+#include "block_grid/block_grid_events.h"
+#include "block_grid/block_grid_shape.h"
 
 #include "box3d/box3d.h"
 
@@ -1895,8 +1895,8 @@ v3BlockGridReplaceStatus v3ReplaceBlockGridShape( b3ShapeId shapeId, v3BlockGrid
 		b3RecWrite_ReplaceBlockGridShape( world->recording, &replaceArgs );
 	}
 
-	// One publication: the world stays locked from the swap through the proxy,
-	// contact, mass, and wake work, so nothing observes a half-updated shape.
+	// The caller serializes world operations. Mark the world locked while updating
+	// geometry, the proxy, contacts, mass, and wake state.
 	world->locked = true;
 	v3BlockContactEventsFlushShape( world, shape );
 	b3ResetBlockGridPairContactsForReplacement( world, shape );

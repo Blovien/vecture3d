@@ -9,9 +9,9 @@
 
 #include "body.h"
 #include "physics_world.h"
-#include "v3_block_grid.h"
-#include "v3_block_grid_internal.h"
-#include "v3_block_grid_pair_world.h"
+#include "block_grid/block_grid.h"
+#include "block_grid/block_grid_internal.h"
+#include "block_grid/block_grid_pair_world.h"
 #include "world_snapshot.h"
 
 #include "box3d/box3d.h"
@@ -1126,10 +1126,8 @@ static void b3RecDispatch_CreateBlockGridShape( const b3RecArgs_CreateBlockGridS
 		return;
 	}
 
-	// Since the interned bytes are placement-free, each shape takes a copy at
-	// its own placement instead of sharing a single live payload the way
-	// compounds do, and the reference taken here stands for that copy while
-	// attachment adds one of its own.
+	// Copy the interned geometry and restore this shape's placement. This reference
+	// keeps the copy alive until attachment retains its own reference.
 	b3RegistrySlot* slot = rdr->slots + id;
 	v3BlockGridData* grid = b3Alloc( (size_t)slot->byteCount );
 	memcpy( grid, slot->bytes, (size_t)slot->byteCount );
@@ -1155,8 +1153,7 @@ static void b3RecDispatch_ReplaceBlockGridShape( const b3RecArgs_ReplaceBlockGri
 		return;
 	}
 
-	// A copy at this op's own placement, for the same reason creation takes one:
-	// the interned bytes are placement-free and the trailer rides the op.
+	// Copy the interned geometry and restore placement from this operation.
 	b3RegistrySlot* slot = rdr->slots + id;
 	v3BlockGridData* grid = b3Alloc( (size_t)slot->byteCount );
 	memcpy( grid, slot->bytes, (size_t)slot->byteCount );

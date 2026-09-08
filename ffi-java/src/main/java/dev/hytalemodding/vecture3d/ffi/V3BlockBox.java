@@ -1,14 +1,14 @@
 package dev.hytalemodding.vecture3d.ffi;
 
 /**
- * One collision box inside the cell its owner index names.
+ * One collision box in the cell selected by {@code ownerCellIndex} in the cook's cell list.
+ * Boxes may be supplied in any order and are grouped by cell.
  *
- * <p>The owner index addresses the cook's cell list. Boxes may be supplied in any order; the cook
- * groups them by owner. The center and the half extents are cell-local: the box covers center minus
- * half extent to center plus half extent, and both bounds must stay inside the unit cube of the
- * owning cell, so a full cube is a center of {@code (0.5, 0.5, 0.5)} with half extents of
- * {@code (0.5, 0.5, 0.5)}. The feature ID is accepted and ignored, reserved for per-box fracture
- * identity; a cell reports its own feature ID.
+ * <p>The center and half extents are cell local. Both center minus half extent and center plus
+ * half extent must lie within [0, 1] on every axis. A full cube has center {@code (0.5, 0.5, 0.5)}
+ * and half extents {@code (0.5, 0.5, 0.5)}.
+ *
+ * <p>The feature ID is reserved for fracture and ignored. Reported identity uses the cell's feature ID.
  */
 public record V3BlockBox(
     int ownerCellIndex,

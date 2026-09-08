@@ -1692,11 +1692,7 @@ void b3Body_SetType( b3BodyId bodyId, b3BodyType type )
 	{
 		b3Shape* shape = b3Array_Get( world->shapes, shapeId );
 
-		// Compound shapes cannot follow a body type change because their children
-		// would have to be re-partitioned, but a BlockGrid can, since its payload
-		// is placement-free and the proxy rebuild below is the only thing the
-		// change actually touches. That is what lets terrain cooked as static
-		// become a moving platform without being recooked.
+		// BlockGrid geometry can be reused after a body-type change without recooking.
 		B3_ASSERT( shape->type != b3_compoundShape );
 
 		shapeId = shape->nextShapeId;

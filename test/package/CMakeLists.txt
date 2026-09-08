@@ -5,14 +5,14 @@ find_package(box3d CONFIG REQUIRED)
 
 get_target_property(box3d_type box3d::box3d TYPE)
 if(NOT box3d_type STREQUAL "SHARED_LIBRARY")
-	message(FATAL_ERROR "package evidence requires the shared library, got ${box3d_type}")
+	message(FATAL_ERROR "Package test requires a shared library, got ${box3d_type}")
 endif()
 
-add_executable(v3_block_grid_package_c v3_block_grid_package_c.c)
+add_executable(v3_block_grid_package_c block_grid_package_c.c)
 set_target_properties(v3_block_grid_package_c PROPERTIES C_STANDARD 17 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
 target_link_libraries(v3_block_grid_package_c PRIVATE box3d::box3d)
 
-add_executable(v3_block_grid_package_cpp v3_block_grid_package_cpp.cpp)
+add_executable(v3_block_grid_package_cpp block_grid_package_cpp.cpp)
 set_target_properties(v3_block_grid_package_cpp PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES CXX_EXTENSIONS NO)
 target_link_libraries(v3_block_grid_package_cpp PRIVATE box3d::box3d)
 

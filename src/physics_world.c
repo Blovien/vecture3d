@@ -22,8 +22,8 @@
 #include "shape.h"
 #include "solver.h"
 #include "solver_set.h"
-#include "v3_block_grid_events.h"
-#include "v3_block_grid_pair_world.h"
+#include "block_grid/block_grid_events.h"
+#include "block_grid/block_grid_pair_world.h"
 
 #include "box3d/box3d.h"
 #include "box3d/constants.h"
@@ -1409,11 +1409,8 @@ static bool DrawQueryCallback( int proxyId, uint64_t userData, void* context )
 					break;
 
 				case v3_blockGridShape:
-					// The debug-shape union has no BlockGrid member yet, so there is
-					// nothing to hand the renderer. Leaving userShape NULL is the
-					// documented "skip draw" path; the BlockGrid sample draws its own
-					// hitboxes. Asserting here would abort any debug build that
-					// registers a debug-shape callback.
+					// The debug-shape union cannot represent BlockGrids.
+					// Leave userShape NULL to skip drawing.
 					break;
 
 				default:

@@ -12,7 +12,7 @@
 #include "physics_world.h"
 #include "platform.h"
 #include "shape.h"
-#include "v3_block_grid_shape.h"
+#include "block_grid/block_grid_shape.h"
 
 #include <string.h>
 
@@ -178,10 +178,7 @@ typedef struct b3QueryPairContext
 
 static bool b3PairQueryCallback( int proxyId, uint64_t userData, void* context );
 
-// Bridges one grid hitbox back into b3PairQueryCallback when the grid is the
-// side that moved. The callback below fakes the descent the other direction
-// gets naturally, so the shared emit path sees the usual "inner query into a
-// container" shape.
+// Passes a moved grid's candidate hitbox index to b3PairQueryCallback.
 typedef struct b3GridPairContext
 {
 	b3QueryPairContext* queryContext;
@@ -195,13 +192,9 @@ static bool b3GridQuerySidePairCallback( int hitboxIndex, uint64_t userData, voi
 	b3GridPairContext* gridPairs = (b3GridPairContext*)context;
 	b3QueryPairContext* queryContext = gridPairs->queryContext;
 
-	// This enters the shared emit tail as though it were an inner query while
-	// leaving the query side pointing at the grid, so the key still sorts both
-	// shape indices alongside the child and matches whatever the opposite
-	// direction would build. Keeping the roles as they are also lets the
-	// moved-proxy dedup below read the other shape's proxy, whereas swapping
-	// them would look tidier and quietly disable that check, emitting the pair
-	// twice whenever both sides move.
+	// Keep the grid as the query side so the pair key includes its child index and
+	// moved-proxy deduplication checks the other shape. Swapping sides would emit
+	// duplicate pairs when both shapes move.
 	queryContext->compoundShapeIndex = gridPairs->otherShapeIndex;
 	queryContext->compoundProxyId = gridPairs->otherProxyId;
 
@@ -274,14 +267,9 @@ static bool b3PairQueryCallback( int proxyId, uint64_t userData, void* context )
 
 		else if ( queryContext->queryShapeIsGrid )
 		{
-			// Here the grid is the side that moved, which reverses the usual
-			// roles, so the shape the query found is the plain one, yet the child
-			// index still has to come from the grid. Enumerating the grid's
-			// hitboxes over that shape's bounds and emitting one pair each
-			// reproduces what the opposite direction gets for free by
-			// descending. Without it a moving grid would only ever meet bodies
-			// that moved under their own power, sliding straight through
-			// anything asleep.
+			// When the grid moves, query its hitboxes against the other shape's bounds.
+			// Each emitted pair must use the grid's child index. This also finds contacts
+			// with sleeping bodies whose proxies did not move.
 			b3Shape* gridShape = b3Array_Get( world->shapes, queryContext->queryShapeIndex );
 			b3Transform gridTransform = b3ToRelativeTransform( b3GetBodyTransform( world, gridShape->bodyId ), b3Pos_zero );
 			b3AABB localAABB = b3AABB_Transform( b3InvertTransform( gridTransform ), shape->fatAABB );
