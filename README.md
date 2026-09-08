@@ -17,9 +17,6 @@ Vecture3D is a fork of Box3D physics engine designed and optimized for the Hytal
 - `abi/abi_manifest.json`: generated ABI contract, refreshed with `./gradlew updateAbiManifest`.
 - `ffi-java/`: Java FFM bindings and consumer tests.
 
-The ABI follows Box3D’s `include/` and `src/` convention. Native filenames omit
-the `v3_` prefix. Exported symbols and Java API names retain their existing names.
-
 ## Features
 
 Vecture3D includes all features synced by the upstream repo: [Box3D's features](https://github.com/erincatto/box3d#features).
@@ -28,6 +25,7 @@ Vecture3D includes all features synced by the upstream repo: [Box3D's features](
 
 - Install [CMake](https://cmake.org/)
 - Install [git](https://git-scm.com/)
+- (TODO: precise java dependencies)
 - Ensure these run from the command line
 
 ## Building with CMake presets (recommended)
@@ -81,50 +79,19 @@ Box3D uses SSE2 with WebAssembly. Define `BOX3D_DISABLE_SIMD` to disable SSE2.
 - cmake --build . --config Release
 - cmake --install . (might need sudo)
 
-## Using Box3D in your project
+## Using Vecture3D in your Hytale plugin
 
-The core library has no dependencies beyond the C runtime (and `libm` on Unix). Linking it
-gives you the `box3d::box3d` target.
-
-I recommend to use FetchContent:
-
-```cmake
-include(FetchContent)
-FetchContent_Declare(box3d
-  GIT_REPOSITORY https://github.com/erincatto/box3d.git
-  GIT_TAG v0.1.0)
-FetchContent_MakeAvailable(box3d)
-
-target_link_libraries(my_app PRIVATE box3d::box3d)
-```
-
-For a vendored copy or git submodule, point `add_subdirectory` at it:
-
-```cmake
-add_subdirectory(extern/box3d)
-
-target_link_libraries(my_app PRIVATE box3d::box3d)
-```
-
-To use a copy installed with `cmake --install`, find the package:
-
-```cmake
-find_package(box3d 0.1 REQUIRED)
-
-target_link_libraries(my_app PRIVATE box3d::box3d)
-```
-
-See [`docs/hello.md`](docs/hello.md) for a minimal first program.
+Vecture3D will provide an higher level Hytale API that is coming soon.
 
 ## Compatibility
 
-The Box3D library and samples build and run on Windows, Linux, and Mac.
+The Vecture3D library and samples build and run on Windows, Linux, and Mac.
 
-You will need a compiler that supports C17 to build the Box3D library.
+You will need a compiler that supports C17 to build the Vecture3D library.
 
 You will need a compiler that supports C++20 to build the samples.
 
-Box3D uses SSE2 and Neon SIMD math to improve performance. SIMD can be disabled by defining `BOX3D_DISABLE_SIMD`.
+Vecture3D uses SSE2 and Neon SIMD math to improve performance. SIMD can be disabled by defining `BOX3D_DISABLE_SIMD`.
 
 ## Documentation
 
