@@ -11,8 +11,6 @@
 
 #include <stdio.h>
 
-// This guards against excessive memory usage and complex collision
-#define B3_MAX_MESH_CONTACT_TRIANGLES 256
 #define B3_MAX_POINTS_PER_TRIANGLE 32
 
 #if B3_ENABLE_VALIDATION
@@ -77,6 +75,7 @@ static int b3QueryHeightFieldTriangles( int* indices, int capacity, const b3Heig
 static void b3RefreshCache( b3Contact* contact, const b3Shape* shapeA, b3WorldTransform xfA, const b3AABB* bounds )
 {
 	B3_ASSERT( shapeA->type == b3_meshShape || shapeA->type == b3_heightShape );
+	B3_ASSERT( contact->kind == b3_meshContactKind );
 
 	b3MeshContact* meshContact = &contact->meshContact;
 
@@ -107,7 +106,7 @@ static void b3RefreshCache( b3Contact* contact, const b3Shape* shapeA, b3WorldTr
 	int triangleIndices[B3_MAX_MESH_CONTACT_TRIANGLES];
 
 	// Bounds are in world space. Convert to the local mesh frame. The broadphase bounds are float,
-	// so the demoted mesh transform is the matching float world frame (exact in float mode).
+	// so the demoted mesh transform uses the matching float world frame.
 	b3Transform meshTransform = b3ToRelativeTransform( xfA, b3Pos_zero );
 	b3AABB localBounds = b3AABB_Transform( b3InvertTransform( meshTransform ), meshContact->queryBounds );
 	int triangleCount;

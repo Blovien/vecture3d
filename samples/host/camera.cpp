@@ -195,7 +195,7 @@ void Camera::SetOrbit( float yawRadians, float pitchRadians, float radius )
 void Camera::SetTarget( b3Pos target )
 {
 	// The sim->display map is a uniform scale plus an optional quarter turn, so apply it directly
-	// rather than through the float matrix. In large world mode that keeps the range the pivot is
+	// rather than through the float matrix. This keeps the range the pivot is
 	// double for; a matrix multiply would round it away.
 	const double s = 1.0 / m_lengthUnitsPerMeter;
 	m_pivot.x = s * target.x;

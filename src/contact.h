@@ -5,6 +5,7 @@
 
 #include "arena_allocator.h"
 #include "container.h"
+#include "block_grid/block_grid_contact.h"
 
 #include "box3d/collision.h"
 #include "box3d/types.h"
@@ -62,9 +63,6 @@ enum b3ContactFlags
 	// This contact wants pre-solve events
 	b3_simEnablePreSolveEvents = 0x00200000,
 
-	// This is a mesh contact
-	b3_simMeshContact = 0x00400000,
-
 	// Relative transform is cached for contact recycling
 	b3_relativeTransformValid = 0x00800000,
 
@@ -94,6 +92,35 @@ typedef struct b3ConvexContact
 {
 	b3ContactCache cache;
 } b3ConvexContact;
+
+// Runtime material values consumed by one solver manifold
+typedef struct b3ContactMaterial
+{
+	float friction;
+	float restitution;
+	float rollingResistance;
+	b3Vec3 tangentVelocity;
+} b3ContactMaterial;
+
+// Resolves both material callbacks and rotates local conveyor velocities into world space
+// effectiveRadius follows the shape-specific rolling convention chosen by the caller
+// Invalid callback output returns false without changing the output
+bool b3ResolveContactMaterial( const b3World* world, const b3SurfaceMaterial* materialA, b3Quat rotationA,
+							   const b3SurfaceMaterial* materialB, b3Quat rotationB, float effectiveRadius,
+							   b3ContactMaterial* contactMaterial );
+
+typedef enum b3ContactKind
+{
+	b3_convexContactKind,
+	b3_meshContactKind,
+	v3_blockGridPairContactKind,
+	b3_contactKindCount,
+} b3ContactKind;
+
+static inline bool b3ContactKindUsesScalarSolver( b3ContactKind kind )
+{
+	return kind == b3_meshContactKind || kind == v3_blockGridPairContactKind;
+}
 
 // Represents the persistent interaction between two shapes
 typedef struct b3Contact
@@ -134,7 +161,9 @@ typedef struct b3Contact
 	uint32_t flags;
 
 	b3Manifold* manifolds;
-	int manifoldCount;
+	uint16_t manifoldCount;
+	uint8_t kind;
+	uint8_t reserved;
 
 	// Cache for contact recycling.
 	b3Quat cachedRotationA;
@@ -144,11 +173,12 @@ typedef struct b3Contact
 	// Mixed friction and restitution
 	float friction;
 
-	// Usage determined by b3_simMeshContact in simFlags
+	// The contact kind selects exactly one owner in this union
 	union
 	{
 		b3ConvexContact convexContact;
 		b3MeshContact meshContact;
+		v3BlockGridPairControl blockGridPair;
 	};
 
 	float restitution;
@@ -159,6 +189,8 @@ typedef struct b3Contact
 	// Used to check for invalid b3ContactId
 	uint32_t generation;
 } b3Contact;
+
+_Static_assert( v3_blockGridPairContactKind < UINT8_MAX, "Contact kind no longer fits its field" );
 
 typedef struct b3ContactSpec
 {
@@ -171,13 +203,26 @@ typedef struct b3ContactSpec
 
 b3DeclareArray( b3ContactSpec );
 
+typedef struct b3ContactUpdateResult
+{
+	bool touching;
+	bool completed;
+} b3ContactUpdateResult;
+
 void b3InitializeContactRegisters( void );
 
-void b3CreateContact( b3World* world, b3Shape* shapeA, b3Shape* shapeB, int childIndex );
+bool b3ContactStorageIsValid( const b3Contact* contact );
+bool b3DestroyContactStorage( b3World* world, b3Contact* contact );
+
+void b3CreateContact( b3World* world, b3Shape* shapeA, b3Shape* shapeB, int childIndex, bool createBlockGridPairs );
 void b3DestroyContact( b3World* world, b3Contact* contact, bool wakeBodies );
 
-bool b3UpdateContact( b3World* world, int workerIndex, b3Contact* contact, b3Shape* shapeA, b3Vec3 localCenterA, b3WorldTransform xfA,
-					  b3Shape* shapeB, b3Vec3 localCenterB, b3WorldTransform xfB, bool isFast, b3Arena arena );
+// Ends each aggregate contact lifetime for a BlockGrid publication while retaining its pair slot.
+void b3ResetBlockGridPairContactsForReplacement( b3World* world, b3Shape* shape );
+
+b3ContactUpdateResult b3UpdateContact( b3World* world, int workerIndex, b3Contact* contact, b3Shape* shapeA, b3Vec3 localCenterA,
+									   b3WorldTransform xfA, b3Shape* shapeB, b3Vec3 localCenterB, b3WorldTransform xfB,
+									   bool isFast, b3Arena arena );
 
 bool b3ComputeMeshManifolds( b3World* world, int workerIndex, b3Contact* contact, const b3Shape* shapeA, const int* materialMap,
 							 b3WorldTransform xfA, const b3Shape* shapeB, b3WorldTransform xfB, bool isFast, b3Arena arena );

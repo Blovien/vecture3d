@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Erin Catto
 // SPDX-License-Identifier: MIT
 
-#include "test_macros.h"
-
 #include "manifold.h"
+#include "test_macros.h"
+#include "block_grid/separation_certifier.h"
+#include "block_grid/witness_point.h"
 
 #include "box3d/collision.h"
 #include "box3d/constants.h"
@@ -13,6 +14,7 @@
 #include <math.h>
 
 static const float kRoot2 = 1.41421356f;
+static const b3Vec3 kAxisX = { 1.0f, 0.0f, 0.0f };
 static const b3Vec3 kAxisY = { 0.0f, 1.0f, 0.0f };
 static const b3Vec3 kAxisZ = { 0.0f, 0.0f, 1.0f };
 
@@ -28,6 +30,24 @@ static b3Quat ExactQuat( b3Vec3 axis, float radians )
 static b3Transform ExactRotation( b3Vec3 axis, float radians )
 {
 	return (b3Transform){ b3Vec3_zero, ExactQuat( axis, radians ) };
+}
+
+// The local x edges are nearly parallel. Their cross axis follows tiltAxis while the twist keeps
+// that axis distinct from every face normal.
+static b3Quat CachedEdgeRotation( float tilt )
+{
+	b3Vec3 tiltAxis = { 0.0f, cosf( 2.8423846f ), sinf( 2.8423846f ) };
+	return b3MulQuat( ExactQuat( tiltAxis, tilt ), ExactQuat( kAxisX, 3.5171536f ) );
+}
+
+static bool CachedEdgeFrame( b3Quat rotation1, b3Quat rotation2, double t0, double t1, v3PairIntervalFrame* frame )
+{
+	b3Vec3 centerB = { -0.78193786f, -1.16055842f, 1.48409746f };
+	b3Sweep sweepA = { .q1 = b3Quat_identity, .q2 = b3Quat_identity };
+	b3Sweep sweepB = { .c1 = centerB, .c2 = centerB, .q1 = rotation1, .q2 = rotation2 };
+	v3SweepPoly polyA, polyB;
+	return v3SweepPolyBuild( &sweepA, &polyA ) && v3SweepPolyBuild( &sweepB, &polyB ) &&
+		   v3PairIntervalFrameBuild( &polyA, &polyB, t0, t1, frame );
 }
 
 // Directed separation along a unit axis n pointing from A to B. Positive means B clears A along n.
@@ -274,6 +294,232 @@ static int EdgePairSweepTest( void )
 	return 0;
 }
 
+// These boxes overlap on every accepted family but have a positive raw gap on family 6. Its short
+// cross axis is below the edge cutoff, so remembering it cannot strengthen the result.
+static int CachedDegenerateEdgeFamilyTest( void )
+{
+	v3PairIntervalFrame frame;
+	b3Quat rotation = CachedEdgeRotation( 5.0e-4f );
+	ENSURE( CachedEdgeFrame( rotation, rotation, 0.0, 0.0, &frame ) );
+	double halfExtentA[3] = { 0.90249028, 0.25391016, 0.11520207 };
+	double halfExtentB[3] = { 0.12106524, 0.34135800, 1.60601002 };
+	double centerOffset[3] = { 0.0, 0.0, 0.0 };
+	v3Interval rawGap = v3ObbSatFamilyGap( &frame, halfExtentA, centerOffset, halfExtentB, centerOffset, 6 );
+
+	v3SeparationWitness uncached = V3_SEPARATION_WITNESS_NONE;
+	v3SeparationVerdict uncachedVerdict =
+		v3SeparationCertify( &frame, halfExtentA, centerOffset, halfExtentB, centerOffset, 0.0, &uncached );
+	v3SeparationWitness cached = { .family = 6 };
+	v3SeparationVerdict cachedVerdict =
+		v3SeparationCertify( &frame, halfExtentA, centerOffset, halfExtentB, centerOffset, 0.0, &cached );
+
+	ENSURE( rawGap.lo > 0.0 );
+	ENSURE( v3ObbSatCertifySeparation( &frame, halfExtentA, centerOffset, halfExtentB, centerOffset, 0.0 ) == -1 );
+	ENSURE( uncachedVerdict == v3_notCertified );
+	ENSURE( cachedVerdict == uncachedVerdict );
+	return 0;
+}
+
+// A remembered face remains eligible for the first certifier tier.
+static int CachedFaceFamilyTest( void )
+{
+	b3Vec3 centerB = { 3.0f, 0.0f, 0.0f };
+	b3Sweep sweepA = { .q1 = b3Quat_identity, .q2 = b3Quat_identity };
+	b3Sweep sweepB = { .c1 = centerB, .c2 = centerB, .q1 = b3Quat_identity, .q2 = b3Quat_identity };
+	v3SweepPoly polyA, polyB;
+	ENSURE( v3SweepPolyBuild( &sweepA, &polyA ) );
+	ENSURE( v3SweepPolyBuild( &sweepB, &polyB ) );
+	v3PairIntervalFrame frame;
+	ENSURE( v3PairIntervalFrameBuild( &polyA, &polyB, 0.0, 0.0, &frame ) );
+
+	double halfExtent[3] = { 0.5, 0.5, 0.5 };
+	double centerOffset[3] = { 0.0, 0.0, 0.0 };
+	v3SeparationWitness cached = { .family = 0 };
+	ENSURE( v3SeparationCertify( &frame, halfExtent, centerOffset, halfExtent, centerOffset, 0.0, &cached ) ==
+			v3_certifiedSeparated );
+	ENSURE( cached.tier == v3_separationTierCached );
+	ENSURE( cached.familyTests == 1 );
+	return 0;
+}
+
+// One continuous rotation moves family 6 from above the edge cutoff to below it. The early point
+// keeps the remembered fast path, while the narrow final interval must agree with an empty witness.
+static int CachedEdgeOrientationChangeTest( void )
+{
+	double halfExtentA[3] = { 0.90249028, 0.25391016, 0.11520207 };
+	double halfExtentB[3] = { 0.12106524, 0.34135800, 1.60601002 };
+	double centerOffset[3] = { 0.0, 0.0, 0.0 };
+	b3Quat validRotation = CachedEdgeRotation( 2.0e-3f );
+	b3Quat degenerateRotation = CachedEdgeRotation( 5.0e-4f );
+
+	v3PairIntervalFrame validFrame;
+	ENSURE( CachedEdgeFrame( validRotation, degenerateRotation, 0.0, 0.0, &validFrame ) );
+	v3SeparationWitness valid = { .family = 6 };
+	ENSURE( v3SeparationCertify( &validFrame, halfExtentA, centerOffset, halfExtentB, centerOffset, 0.0, &valid ) ==
+			v3_certifiedSeparated );
+	ENSURE( valid.tier == v3_separationTierCached );
+	ENSURE( valid.familyTests == 1 );
+
+	v3PairIntervalFrame degenerateFrame;
+	ENSURE( CachedEdgeFrame( validRotation, degenerateRotation, 0.999999, 1.0, &degenerateFrame ) );
+	v3Interval rawGap = v3ObbSatFamilyGap( &degenerateFrame, halfExtentA, centerOffset, halfExtentB, centerOffset, 6 );
+	v3SeparationWitness uncached = V3_SEPARATION_WITNESS_NONE;
+	v3SeparationWitness cached = { .family = 6 };
+	v3SeparationVerdict uncachedVerdict =
+		v3SeparationCertify( &degenerateFrame, halfExtentA, centerOffset, halfExtentB, centerOffset, 0.0, &uncached );
+	v3SeparationVerdict cachedVerdict =
+		v3SeparationCertify( &degenerateFrame, halfExtentA, centerOffset, halfExtentB, centerOffset, 0.0, &cached );
+	ENSURE( rawGap.lo > 0.0 );
+	ENSURE( v3ObbSatCertifySeparation( &degenerateFrame, halfExtentA, centerOffset, halfExtentB, centerOffset, 0.0 ) == -1 );
+	ENSURE( uncachedVerdict == v3_notCertified );
+	ENSURE( cachedVerdict == uncachedVerdict );
+	return 0;
+}
+
+// The parked witness point primitive at explicit poses. Two unit boxes given by a body origin plus
+// a centre offset. Every coordinate is an exact binary fraction so the expected witness point is
+// exact. A is centred on the origin (-0.25 + 0.25), B is either overlapping at 0.25 or separated at
+// 1.25, which leaves a 0.25 m gap. Alternating projection puts the witness for the separated pair
+// at the midpoint of the closest points, 0.5 and 0.75, so 0.625, which is 0.125 m outside each box.
+// Certification inflates each box by delta over root three, not by delta, and the refusing delta is
+// chosen to tell those two apart: 0.1875 / sqrt(3) is 0.108, which cannot bridge the 0.125 m
+// overhang, while a plain 0.1875 inflation would reach it and wrongly certify. 0.5 m certifies
+// either way, so it only pins the positive direction.
+static int WitnessPointPoseTest( void )
+{
+	const double identity[9] = { 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0 };
+	const double halfExtent[3] = { 0.5, 0.5, 0.5 };
+	// Body origin and centre offset are distinct so the offset rotation path is exercised
+	const double originA[3] = { -0.25, 0.0, 0.0 };
+	const double offsetA[3] = { 0.25, 0.0, 0.0 };
+	const double zeroOffset[3] = { 0.0, 0.0, 0.0 };
+
+	const double overlappingOriginB[3] = { 0.25, 0.0, 0.0 };
+	v3WitnessPointResult overlapping;
+	ENSURE( v3WitnessCertifyContactAtPose( identity, originA, halfExtent, offsetA, identity, overlappingOriginB, halfExtent,
+										   zeroOffset, 0.0, &overlapping ) );
+	ENSURE( overlapping.certified );
+	ENSURE_SMALL( overlapping.point[0], 1e-12 );
+	ENSURE_SMALL( overlapping.point[1], 1e-12 );
+	ENSURE_SMALL( overlapping.point[2], 1e-12 );
+
+	const double separatedOriginB[3] = { 1.25, 0.0, 0.0 };
+	v3WitnessPointResult refused;
+	ENSURE( v3WitnessCertifyContactAtPose( identity, originA, halfExtent, offsetA, identity, separatedOriginB, halfExtent,
+										   zeroOffset, 0.1875, &refused ) == false );
+	ENSURE( refused.certified == false );
+
+	v3WitnessPointResult inflated;
+	ENSURE( v3WitnessCertifyContactAtPose( identity, originA, halfExtent, offsetA, identity, separatedOriginB, halfExtent,
+										   zeroOffset, 0.5, &inflated ) );
+	ENSURE( inflated.certified );
+	ENSURE_SMALL( inflated.point[0] - 0.625, 1e-12 );
+	return 0;
+}
+
+// The same two boxes reached through the sweep path instead of explicit poses, which is how the
+// certifier used to call the witness primitive. Both sweeps are stationary with identity rotation,
+// so the pose at t = 0 must reproduce WitnessPointPoseTest exactly: the sweep centre is c1 and the
+// box centre is c1 + centerOffset - localCenter, which for A is -0.25 + 0.5 - 0.25 = 0. Same
+// verdicts, same witness point, and the same 0.1875 refusing delta that separates an inflation of
+// delta over root three from an inflation of delta.
+static int WitnessPointSweepTest( void )
+{
+	const double halfExtent[3] = { 0.5, 0.5, 0.5 };
+	const double offsetA[3] = { 0.5, 0.0, 0.0 };
+	const double zeroOffset[3] = { 0.0, 0.0, 0.0 };
+
+	b3Sweep sweepA = { .localCenter = { 0.25f, 0.0f, 0.0f },
+					   .c1 = { -0.25f, 0.0f, 0.0f },
+					   .c2 = { -0.25f, 0.0f, 0.0f },
+					   .q1 = b3Quat_identity,
+					   .q2 = b3Quat_identity };
+	b3Sweep overlappingB = {
+		.c1 = { 0.25f, 0.0f, 0.0f }, .c2 = { 0.25f, 0.0f, 0.0f }, .q1 = b3Quat_identity, .q2 = b3Quat_identity };
+	b3Sweep separatedB = {
+		.c1 = { 1.25f, 0.0f, 0.0f }, .c2 = { 1.25f, 0.0f, 0.0f }, .q1 = b3Quat_identity, .q2 = b3Quat_identity };
+
+	v3SweepPoly polyA, polyOverlapping, polySeparated;
+	ENSURE( v3SweepPolyBuild( &sweepA, &polyA ) );
+	ENSURE( v3SweepPolyBuild( &overlappingB, &polyOverlapping ) );
+	ENSURE( v3SweepPolyBuild( &separatedB, &polySeparated ) );
+
+	v3WitnessPointResult overlapping;
+	ENSURE( v3WitnessCertifyContact( &polyA, &polyOverlapping, halfExtent, offsetA, halfExtent, zeroOffset, 0.0, 0.0,
+									 &overlapping ) );
+	ENSURE( overlapping.certified );
+	ENSURE_SMALL( overlapping.point[0], 1e-12 );
+
+	v3WitnessPointResult refused;
+	ENSURE( v3WitnessCertifyContact( &polyA, &polySeparated, halfExtent, offsetA, halfExtent, zeroOffset, 0.0, 0.1875,
+									 &refused ) == false );
+	ENSURE( refused.certified == false );
+
+	v3WitnessPointResult inflated;
+	ENSURE( v3WitnessCertifyContact( &polyA, &polySeparated, halfExtent, offsetA, halfExtent, zeroOffset, 0.0, 0.5, &inflated ) );
+	ENSURE( inflated.certified );
+	ENSURE_SMALL( inflated.point[0] - 0.625, 1e-12 );
+	return 0;
+}
+
+// The parked advance machinery on a separated pair, every expected value derived by hand from the
+// fixture rather than pinned from a run.
+//
+// A is a stationary unit box at the origin. B is a unit box translating from x = 1.5 to x = 2.0 with
+// no rotation, so dc = (0.5, 0, 0). Every coordinate is an exact binary fraction.
+//
+// Corner envelope: with q1 == q2 the quaternion chord is zero, so the rotation term vanishes for any
+// rho and the envelope is pure translation, |dc| times the width of the time range. Over [0, 1] that
+// is 0.5, over [0, 0.5] it is 0.25, and for stationary A it is 0 whatever rho is.
+//
+// Gap at a point frame: identity rotations make family 0 A's x face axis, so the true gap is the
+// centre distance less the two half extents. At t = 0 that is 1.5 - 0.5 - 0.5 = 0.5. At t = 0.75 the
+// centre is 1.5 + 0.75 * 0.5 = 1.875, so the gap is 0.875.
+//
+// Advance: with no rotation the closing rate lambda is just |dcB - dcA| = 0.5, and the step is
+// (gap - sigma) / lambda clamped to the time left in the step. From t = 0 with gap 0.25 and sigma
+// 0.0625 that is 0.1875 / 0.5 = 0.375. From t = 0.75 the same arithmetic gives 0.375 but only 0.25
+// of the step remains, so the clamp must win. A gap that does not clear sigma admits no advance.
+static int SeparationAdvanceEnvelopeTest( void )
+{
+	const double halfExtent[3] = { 0.5, 0.5, 0.5 };
+	const double zeroOffset[3] = { 0.0, 0.0, 0.0 };
+
+	b3Sweep sweepA = { .c1 = { 0.0f, 0.0f, 0.0f }, .c2 = { 0.0f, 0.0f, 0.0f }, .q1 = b3Quat_identity, .q2 = b3Quat_identity };
+	b3Sweep sweepB = { .c1 = { 1.5f, 0.0f, 0.0f }, .c2 = { 2.0f, 0.0f, 0.0f }, .q1 = b3Quat_identity, .q2 = b3Quat_identity };
+	v3SweepPoly polyA, polyB;
+	ENSURE( v3SweepPolyBuild( &sweepA, &polyA ) );
+	ENSURE( v3SweepPolyBuild( &sweepB, &polyB ) );
+
+	// Translation only, so rho cannot change the envelope
+	ENSURE_SMALL( v3SweepPolyCornerEnvelope( &polyA, 0.0, 0.0, 1.0 ), 1e-12 );
+	ENSURE_SMALL( v3SweepPolyCornerEnvelope( &polyA, 3.0, 0.0, 1.0 ), 1e-12 );
+	ENSURE_SMALL( v3SweepPolyCornerEnvelope( &polyB, 0.0, 0.0, 1.0 ) - 0.5, 1e-12 );
+	ENSURE_SMALL( v3SweepPolyCornerEnvelope( &polyB, 3.0, 0.0, 1.0 ) - 0.5, 1e-12 );
+	ENSURE_SMALL( v3SweepPolyCornerEnvelope( &polyB, 3.0, 0.0, 0.5 ) - 0.25, 1e-12 );
+
+	v3PairIntervalFrame frameAtStart;
+	ENSURE( v3PairIntervalFrameBuild( &polyA, &polyB, 0.0, 0.0, &frameAtStart ) );
+	ENSURE_SMALL( v3SeparationGapAtTime( &frameAtStart, halfExtent, zeroOffset, halfExtent, zeroOffset, 0 ) - 0.5, 1e-12 );
+
+	v3PairIntervalFrame frameAtThreeQuarters;
+	ENSURE( v3PairIntervalFrameBuild( &polyA, &polyB, 0.75, 0.75, &frameAtThreeQuarters ) );
+	ENSURE_SMALL( v3SeparationGapAtTime( &frameAtThreeQuarters, halfExtent, zeroOffset, halfExtent, zeroOffset, 0 ) - 0.875,
+				  1e-12 );
+
+	// (0.25 - 0.0625) / 0.5, and rho is inert because neither body rotates
+	ENSURE_SMALL( v3SeparationAdvance( &polyA, &polyB, &frameAtStart, 0.0, 0.0, 0.25, 0.0625 ) - 0.375, 1e-12 );
+	ENSURE_SMALL( v3SeparationAdvance( &polyA, &polyB, &frameAtStart, 2.0, 3.0, 0.25, 0.0625 ) - 0.375, 1e-12 );
+
+	// The same step would run past the end of the range, so the time left must clamp it
+	ENSURE_SMALL( v3SeparationAdvance( &polyA, &polyB, &frameAtThreeQuarters, 0.0, 0.0, 0.25, 0.0625 ) - 0.25, 1e-12 );
+
+	// A gap that does not clear sigma buys no time
+	ENSURE( v3SeparationAdvance( &polyA, &polyB, &frameAtStart, 0.0, 0.0, 0.0625, 0.0625 ) == 0.0 );
+	ENSURE( v3SeparationAdvance( &polyA, &polyB, &frameAtStart, 0.0, 0.0, 0.03125, 0.0625 ) == 0.0 );
+	return 0;
+}
+
 static uint32_t g_seed = 987654321u;
 
 static float NextFloat( float lower, float upper )
@@ -486,6 +732,12 @@ int SeparatingAxisTest( void )
 	RUN_SUBTEST( FaceFarSeparatedTest );
 	RUN_SUBTEST( OffsetFaceAxisBTest );
 	RUN_SUBTEST( EdgePairSweepTest );
+	RUN_SUBTEST( CachedDegenerateEdgeFamilyTest );
+	RUN_SUBTEST( CachedFaceFamilyTest );
+	RUN_SUBTEST( CachedEdgeOrientationChangeTest );
+	RUN_SUBTEST( WitnessPointPoseTest );
+	RUN_SUBTEST( WitnessPointSweepTest );
+	RUN_SUBTEST( SeparationAdvanceEnvelopeTest );
 	RUN_SUBTEST( SeparatingAxisOracleTest );
 	RUN_SUBTEST( OffsetHullOracleTest );
 

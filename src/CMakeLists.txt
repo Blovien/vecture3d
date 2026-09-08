@@ -10,6 +10,35 @@ set(BOX3D_SOURCE_FILES
 	bitset.h
 	block_allocator.c
 	block_allocator.h
+	block_grid/block_grid.c
+	block_grid/block_grid_cook.c
+	block_grid/block_grid_contact.c
+	block_grid/block_grid_contact.h
+	block_grid/block_grid_events.c
+	block_grid/block_grid_events.h
+	block_grid/block_grid.h
+	block_grid/block_grid_internal.h
+	block_grid/block_grid_pair.c
+	block_grid/block_grid_pair_narrow.c
+	block_grid/block_grid_pair_reduce.c
+	block_grid/block_grid_pair_update.c
+	block_grid/block_grid_pair_update.h
+	block_grid/block_grid_pair_world.c
+	block_grid/block_grid_pair_world.h
+	block_grid/block_grid_pair.h
+	block_grid/block_grid_public.c
+	block_grid/block_grid_query.c
+	block_grid/block_grid_shape.c
+	block_grid/block_grid_shape.h
+	block_grid/interval.h
+	block_grid/obb_interval_sat.c
+	block_grid/obb_interval_sat.h
+	block_grid/separation_certifier.c
+	block_grid/separation_certifier.h
+	block_grid/sweep_interval.c
+	block_grid/sweep_interval.h
+	block_grid/witness_point.c
+	block_grid/witness_point.h
 	body.c
 	body.h
 	broad_phase.c
@@ -104,12 +133,16 @@ set(BOX3D_INCLUDE_FILES
 	../include/box3d/types.h
 )
 
+set(VECTURE3D_INCLUDE_FILES
+	../include/vecture3d/block_grid.h
+)
+
 # Hide internal functions
 # https://gcc.gnu.org/wiki/Visibility
 set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN 1)
 
-add_library(box3d ${BOX3D_SOURCE_FILES} ${BOX3D_INCLUDE_FILES})
+add_library(box3d ${BOX3D_SOURCE_FILES} ${BOX3D_INCLUDE_FILES} ${VECTURE3D_INCLUDE_FILES})
 
 # target_link_libraries(box3d PRIVATE eastl)
 
@@ -153,6 +186,14 @@ if (BOX3D_PROFILE)
 	FetchContent_MakeAvailable(tracy)
 
 	target_link_libraries(box3d PUBLIC TracyClient)
+	set(BOX3D_PROFILE_CALLSTACK_DEPTH "0" CACHE STRING "Tracy call-stack depth (0 disables zone call stacks)")
+	if(NOT BOX3D_PROFILE_CALLSTACK_DEPTH MATCHES "^[0-9]+$" OR BOX3D_PROFILE_CALLSTACK_DEPTH GREATER 62)
+		message(FATAL_ERROR "BOX3D_PROFILE_CALLSTACK_DEPTH must be an integer from 0 to 62")
+	endif()
+	target_compile_definitions(box3d PUBLIC TRACY_CALLSTACK=${BOX3D_PROFILE_CALLSTACK_DEPTH})
+	if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+		target_compile_options(box3d PUBLIC -fno-omit-frame-pointer)
+	endif()
 endif()
 
 if(BOX3D_VALIDATE)
@@ -164,12 +205,6 @@ endif()
 if (BOX3D_DISABLE_SIMD)
 	message(STATUS "Box3D SIMD disabled")
 	target_compile_definitions(box3d PRIVATE BOX3D_DISABLE_SIMD)
-endif()
-
-if (BOX3D_DOUBLE_PRECISION)
-	message(STATUS "Box3D double precision ON")
-	# PUBLIC: consumers must see the same precision mode in the headers or they cannot match the ABI
-	target_compile_definitions(box3d PUBLIC BOX3D_DOUBLE_PRECISION)
 endif()
 
 # Enable asserts in release with debug info
@@ -218,6 +253,7 @@ endif()
 
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" PREFIX "src" FILES ${BOX3D_SOURCE_FILES})
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/../include" PREFIX "include" FILES ${BOX3D_INCLUDE_FILES})
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/../include" PREFIX "include" FILES ${VECTURE3D_INCLUDE_FILES})
 
 add_library(box3d::box3d ALIAS box3d)
 
@@ -243,6 +279,11 @@ install(
 install(
   FILES ${BOX3D_INCLUDE_FILES}
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/box3d
+)
+
+install(
+  FILES ${VECTURE3D_INCLUDE_FILES}
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/vecture3d
 )
 
 include(CMakePackageConfigHelpers)

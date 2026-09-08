@@ -8,6 +8,7 @@
 #include "id.h"
 #include "math_functions.h"
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define B3_DEFAULT_CATEGORY_BITS UINT64_MAX
@@ -163,7 +164,24 @@ typedef struct b3WorldDef
 	float contactSpeed;
 
 	/// Maximum linear speed. Usually meters per second.
+	/// @warning A speed limit alone does not guarantee collision safety. BlockGrid speculative admission
+	/// predicts free motion over the current step. Later contact or joint impulses can change that motion,
+	/// and rotational paths are not certified. Test the chosen speeds and timestep against the game's geometry.
 	float maximumLinearSpeed;
+
+	/// Maximum angular speed. Radians per second. Zero selects the Box3D default, which is the
+	/// existing per-step rotation clamp B3_MAX_ROTATION per step and therefore scales with the
+	/// step length; the sentinel is resolved at step time so the default stays B3_MAX_ROTATION per
+	/// step at every step length.
+	/// A body may still be exempted per body with b3BodyDef::allowFastRotation.
+	/// @warning The one cell per step consequence documented on maximumLinearSpeed applies to
+	/// rotation as well: a fast enough spin sweeps a far corner through thin geometry between steps.
+	float maximumAngularSpeed;
+
+	/// Maximum number of Projectile sweep candidates a single sweep may consider. Zero, the default,
+	/// means unlimited. Bounding this bounds sweep work per step at the cost of missing candidates
+	/// beyond the cap.
+	int projectileCandidateCap;
 
 	/// Optional mixing callback for friction. The default uses sqrt(frictionA * frictionB).
 	b3FrictionCallback* frictionCallback;
@@ -301,6 +319,14 @@ typedef struct b3BodyDef
 
 	/// Sleep speed threshold, default is 0.05 meters per second
 	float sleepThreshold;
+
+	/// Continuous collision safety factor. A dynamic body is considered fast when its full-step
+	/// point motion is greater than this factor times its minimum extent. Smaller values engage
+	/// continuous collision sooner but may increase work and visible motion hitches.
+	/// Non-dimensional. Recommended range [0.01, 0.5]. Default is 0.5. Any finite value greater
+	/// than or equal to zero is accepted; zero qualifies every body with non-zero measured motion.
+	/// Values above 0.5 delay continuous collision and reduce protection.
+	float safetyFactor;
 
 	/// Optional body name for debugging.
 	const char* name;
@@ -450,8 +476,12 @@ typedef enum b3ShapeType
 	/// A sphere with an offset
 	b3_sphereShape,
 
-	/// A static voxel shape backed by immutable convex children
-	b3_voxelShape,
+	/// A BlockGrid, which holds immutable blocks alongside their exact hitboxes
+	/// and indexes both through 4x4x4 Occupancy Groups. It sits on any body
+	/// type, and because its mass is integrated over the blocks rather than the
+	/// bounds, a hollow dynamic grid weighs its shell instead of its box. It
+	/// collides against spheres, capsules, hulls and other BlockGrids.
+	v3_blockGridShape,
 
 	/// The number of shape types
 	b3_shapeTypeCount
@@ -595,6 +625,44 @@ typedef struct b3Counters
 	int pushBackIterations;
 	int rootIterations;
 } b3Counters;
+
+/// The whole BlockGrid diagnostic surface: one saturating per-step counters struct.
+/// Every field counts the latest completed step only and clamps at UINT64_MAX rather than
+/// wrapping. The world keeps them as plain increments, so reading them is optional and
+/// leaving them unread costs nothing.
+/// @ingroup world
+typedef struct v3BlockGridPairCounters
+{
+	/// Candidate hitbox pairs the pair traversal enumerated.
+	uint64_t candidateHitboxPairCount;
+
+	/// Candidate hitbox pairs that produced a manifold. This is not the number of contacts.
+	uint64_t touchingPairCount;
+
+	/// BlockGrid pair contacts the pass selected.
+	uint64_t contactCount;
+
+	/// Projectile sweeps against a BlockGrid the continuous stage ran in the latest step.
+	/// One per fast convex shape swept against one BlockGrid shape, whatever the outcome.
+	uint64_t projectileSweepCount;
+
+	/// Sweeps of that count the candidate cap left without an answer, because it ran out
+	/// while a Hitbox that could still be reached sooner than the best impact found was
+	/// unvisited. Each one held its Projectile at the accepted fraction with its velocity
+	/// kept, rather than accepting an impact past the Hitbox it never looked at. Always
+	/// zero while b3WorldDef::projectileCandidateCap is zero, which is unlimited.
+	uint64_t capExhaustionCount;
+
+	/// BlockGrid revisions v3ReplaceBlockGridShape published since the previous step.
+	/// Replacement runs between steps, so a publication is visible after the next one.
+	uint64_t replacementPublishedCount;
+
+	/// Peak scratch bytes the pair pass took from the step arena.
+	uint64_t scratchPeakBytes;
+
+	/// Pair updates that reduced a fragmented contact to the bounded support subset in the latest step.
+	uint64_t contactReductionCount;
+} v3BlockGridPairCounters;
 //! @endcond
 
 /// Joint type enumeration. This is useful because all joint types use b3JointId and sometimes you
@@ -916,7 +984,9 @@ typedef struct b3SphericalJointDef
 	/// The maximum motor torque, typically in newton-meters. Non-negative number.
 	float maxMotorTorque;
 
-	/// The desired motor angular velocity in radians per second.
+	/// The desired motor angular velocity in radians per second. This is the relative angular
+	/// velocity between the two bodies in world space.
+	/// motorVelocity = angularVelocityB - angularVelocityA
 	b3Vec3 motorVelocity;
 } b3SphericalJointDef;
 
@@ -1444,8 +1514,6 @@ typedef struct b3CastOutput
 	bool hit;
 } b3CastOutput;
 
-#if defined( BOX3D_DOUBLE_PRECISION )
-
 /// Ray cast or shape-cast output in world space. The hit point is a world position so the result
 /// stays precise far from the world origin. Mirrors b3CastOutput with a double precision point.
 typedef struct b3WorldCastOutput
@@ -1474,13 +1542,6 @@ typedef struct b3WorldCastOutput
 	/// Did the cast hit?
 	bool hit;
 } b3WorldCastOutput;
-
-#else
-
-/// Same type in single precision.
-typedef b3CastOutput b3WorldCastOutput;
-
-#endif
 
 /// Body cast result for ray and shape casts.
 typedef struct b3BodyCastResult
@@ -1624,31 +1685,31 @@ typedef enum b3TOIState
 	b3_toiStateSeparated
 } b3TOIState;
 
-/// Time of impact output
+/// Time of impact output.
 typedef struct b3TOIOutput
 {
-	/// The type of result
+	/// The type of result.
 	b3TOIState state;
 
-	/// The hit point
+	/// The hit point. A shared point if overlapped.
 	b3Vec3 point;
 
-	/// The hit normal
+	/// The hit normal. Zero if overlapped.
 	b3Vec3 normal;
 
-	/// The sweep time of the collision
+	/// The sweep time of the collision. 0 if overlapped.
 	float fraction;
 
-	/// The final distance
+	/// The final distance. 0 if overlapped.
 	float distance;
 
-	/// Number of outer iterations
+	/// Number of outer iterations.
 	int distanceIterations;
 
-	/// Total number of push back iterations
+	/// Total number of push back iterations.
 	int pushBackIterations;
 
-	/// Total number of root iterations
+	/// Total number of root iterations.
 	int rootIterations;
 
 	/// Indicates that the time of impact detected initial
@@ -1821,6 +1882,15 @@ typedef struct b3PlaneResult
 	/// Closest point on the shape. May not be unique.
 	b3Vec3 point;
 
+	/// The index of the mesh or height field triangle hit.
+	int triangleIndex;
+
+	/// The index of the compound child shape.
+	int childIndex;
+
+	/// The material index.
+	int materialIndex;
+
 } b3PlaneResult;
 
 /// These are collision planes that can be fed to b3SolvePlanes. Normally
@@ -1860,6 +1930,22 @@ typedef struct b3BodyPlaneResult
 	/// The plane result.
 	b3PlaneResult result;
 } b3BodyPlaneResult;
+
+/// Body time of impact result for movers.
+typedef struct b3BodyTOIResult
+{
+	/// The hit point in world space.
+	b3Pos point;
+
+	/// The hit normal. Points from the body to the mover.
+	b3Vec3 normal;
+
+	/// The sweep time of the collision.
+	float fraction;
+
+	/// The hit shape.
+	b3ShapeId shapeId;
+} b3BodyTOIResult;
 
 /// Used to collect collision planes for character movers.
 /// Return true to continue gathering planes.
@@ -2072,7 +2158,10 @@ typedef struct b3MeshDef
 	/// Triangle vertices.
 	b3Vec3* vertices;
 
-	/// Triangle vertex indices. 3 for each triangle. CCW winding.
+	/// Stride between vertices. Use 0 for contiguous vertices.
+	size_t stride;
+
+	/// Triangle vertex indices. 3 for each triangle. CCW winding unless CW is indicated below.
 	int32_t* indices;
 
 	/// Triangle material index. 1 per triangle. Indexes into b3ShapeDef::materials.
@@ -2098,6 +2187,9 @@ typedef struct b3MeshDef
 
 	/// Compute triangle adjacency information using shared edges
 	bool identifyEdges;
+
+	/// Input indices have clockWise winding order.
+	bool clockWiseWinding;
 } b3MeshDef;
 
 /// 64-bit mesh version. Useful for validating serialized data.
@@ -2966,7 +3058,6 @@ typedef struct b3DebugShape
 		const b3Capsule* capsule;			  ///< Capsule shape.
 		const b3CompoundData* compound;		  ///< Compound shape.
 		const b3HeightFieldData* heightField; ///< Height-field shape.
-		const b3CompoundData* voxel;			  ///< Voxel shape.
 		const b3HullData* hull;				  ///< Convex hull shape.
 		const b3Mesh* mesh;					  ///< Mesh shape with scale.
 		const b3Sphere* sphere;				  ///< Sphere shape.
@@ -2974,7 +3065,7 @@ typedef struct b3DebugShape
 } b3DebugShape;
 
 /// This struct is passed to b3World_Draw to draw a debug view of the simulation world.
-/// Callbacks receive world coordinates. In large world mode the translation is double precision so
+/// Callbacks receive world coordinates with double precision translation so
 /// it stays accurate far from the origin. Shift into your own camera frame inside the callbacks.
 typedef struct b3DebugDraw
 {

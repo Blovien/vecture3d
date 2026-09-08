@@ -67,10 +67,7 @@ typedef struct b3Transform
 	b3Quat q;
 } b3Transform;
 
-#if defined( BOX3D_DOUBLE_PRECISION )
-
-/// A world position. Double precision in large world mode so coordinates stay accurate far
-/// from the origin.
+/// A world position with double precision coordinates.
 typedef struct b3Pos
 {
 	double x, y, z;
@@ -83,16 +80,6 @@ typedef struct b3WorldTransform
 	b3Pos p;
 	b3Quat q;
 } b3WorldTransform;
-
-#else
-
-/// In single precision mode these types are the same.
-typedef b3Vec3 b3Pos;
-
-/// In single precision mode these types are the same.
-typedef b3Transform b3WorldTransform;
-
-#endif
 
 /// A 3x3 matrix.
 typedef struct b3Matrix3
@@ -133,7 +120,6 @@ static const b3Matrix3 b3Mat3_identity = {
 	{ 0.0f, 0.0f, 1.0f },
 };
 
-// Valid in both modes: 0.0f promotes to double, the identity rotation stays float
 static const b3Pos b3Pos_zero = { 0.0f, 0.0f, 0.0f };
 static const b3WorldTransform b3WorldTransform_identity = { { 0.0f, 0.0f, 0.0f }, { { 0.0f, 0.0f, 0.0f }, 1.0f } };
 
@@ -276,14 +262,12 @@ B3_INLINE float b3DistanceSquared( b3Vec3 a, b3Vec3 b )
 B3_FORCE_INLINE b3Vec3 b3Normalize( b3Vec3 a )
 {
 	float lengthSquared = a.x * a.x + a.y * a.y + a.z * a.z;
-
 	if ( lengthSquared > 1000.0f * FLT_MIN )
 	{
 		float s = 1.0f / sqrtf( lengthSquared );
 		b3Vec3 u = { s * a.x, s * a.y, s * a.z };
 		return u;
 	}
-
 	return B3_LITERAL( b3Vec3 ){ 0.0f, 0.0f, 0.0f };
 }
 
@@ -291,15 +275,17 @@ B3_FORCE_INLINE b3Vec3 b3Normalize( b3Vec3 a )
 /// if the input is very small.
 B3_INLINE b3Vec3 b3GetLengthAndNormalize( float* length, b3Vec3 a )
 {
-	*length = b3Length( a );
-	if ( *length < FLT_EPSILON )
+	float lengthSquared = a.x * a.x + a.y * a.y + a.z * a.z;
+	if ( lengthSquared > 1000.0f * FLT_MIN )
 	{
-		return b3Vec3_zero;
+		*length = sqrtf( lengthSquared );
+		float s = 1.0f / *length;
+		b3Vec3 u = { s * a.x, s * a.y, s * a.z };
+		return u;
 	}
 
-	float invLength = 1.0f / *length;
-	b3Vec3 n = { invLength * a.x, invLength * a.y, invLength * a.z };
-	return n;
+	*length = 0.0f;
+	return B3_LITERAL( b3Vec3 ){ 0.0f, 0.0f, 0.0f };
 }
 
 /// Get a unit vector that is perpendicular to the supplied vector.
@@ -641,9 +627,7 @@ B3_INLINE b3Vec3 b3InvTransformPoint( b3Transform t, b3Vec3 v )
 	return b3InvRotateVector( t.q, b3Sub( v, t.p ) );
 }
 
-// World position boundary. These cross between the double precision world space at the public
-// boundary and the float interior. One set of bodies serves both modes: the typedefs collapse
-// the types in float mode and the explicit float casts become no-ops.
+// Convert between double precision world positions and float local coordinates.
 
 /// Convert a vector to a world position.
 B3_INLINE b3Pos b3ToPos( b3Vec3 v )
@@ -660,26 +644,18 @@ B3_INLINE b3Vec3 b3ToVec3( b3Pos p )
 /// Narrow a world coordinate to float, rounding toward negative infinity. Use with
 /// b3RoundUpFloat to build a conservative float box that always contains the double bounds,
 /// where plain rounding far from the origin could clip. nextafterf is an exact IEEE operation,
-/// so this is cross-platform deterministic. With large world mode off this is a plain conversion.
+/// so the rounding is deterministic across platforms.
 B3_INLINE float b3RoundDownFloat( double x )
 {
-#if defined( BOX3D_DOUBLE_PRECISION )
 	float f = (float)x;
 	return (double)f > x ? nextafterf( f, -FLT_MAX ) : f;
-#else
-	return (float)x;
-#endif
 }
 
 /// Narrow a world coordinate to float, rounding toward positive infinity.
 B3_INLINE float b3RoundUpFloat( double x )
 {
-#if defined( BOX3D_DOUBLE_PRECISION )
 	float f = (float)x;
 	return (double)f < x ? nextafterf( f, FLT_MAX ) : f;
-#else
-	return (float)x;
-#endif
 }
 
 /// a - b, demoted to float. The primary precision boundary operation.
@@ -756,9 +732,9 @@ B3_INLINE b3WorldTransform b3MakeWorldTransform( b3Transform t )
 	return w;
 }
 
-/// Translate a local AABB by a world origin, rounding outward so the float box always contains
-/// the double box. Far from the origin a plain conversion could clip a shape out of its own box.
-/// In float mode the origin is float and the rounding is a no-op.
+/// Translate a local AABB by a world position, rounding outward so the single precision box
+/// encloses the double precision box. Far from the origin a plain conversion could clip a
+/// shape out of its own box.
 B3_INLINE b3AABB b3OffsetAABB( b3AABB localBox, b3Pos origin )
 {
 	b3AABB out;
@@ -1178,8 +1154,6 @@ B3_FORCE_INLINE b3Vec3 operator-( b3Vec3 a, b3Vec3 b )
 	return { a.x - b.x, a.y - b.y, a.z - b.z };
 }
 
-#if defined( BOX3D_DOUBLE_PRECISION )
-
 /// Offset a world position by a vector.
 B3_FORCE_INLINE b3Pos operator+( b3Pos a, b3Vec3 b )
 {
@@ -1197,8 +1171,6 @@ B3_FORCE_INLINE b3Vec3 operator-( b3Pos a, b3Pos b )
 {
 	return { (float)( a.x - b.x ), (float)( a.y - b.y ), (float)( a.z - b.z ) };
 }
-
-#endif
 
 #endif
 

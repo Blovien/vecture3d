@@ -35,7 +35,7 @@ class V3JointControlQueryTest {
                 0.0,
                 0.0
             );
-            world.replaceBoxBodies(List.of(), List.of(anchor, body));
+            V3TestSupport.attachCenteredUnitGrids(world, List.of(anchor, body));
             world.replaceDistanceJoints(List.of(), List.of(distanceJoint(2_100, anchor.handle(), body.handle())));
 
             V3StepResult result = null;
@@ -76,7 +76,7 @@ class V3JointControlQueryTest {
                 4.0,
                 0.0
             );
-            world.replaceBoxBodies(List.of(), List.of(kinematic, dynamic));
+            V3TestSupport.attachCenteredUnitGrids(world, List.of(kinematic, dynamic));
 
             V3StepResult result = world.step(
                 4,
@@ -128,7 +128,7 @@ class V3JointControlQueryTest {
                 0.0,
                 0.0
             );
-            world.replaceBoxBodies(List.of(), List.of(dynamic));
+            V3TestSupport.attachCenteredUnitGrids(world, List.of(dynamic));
             V3StepResult before = world.step(0, List.of(), List.of(), List.of());
             List<V3Query> tooManyQueries = new ArrayList<>(1_025);
             for (int index = 0; index < 1_025; index++) {
@@ -194,10 +194,8 @@ class V3JointControlQueryTest {
                 0.0,
                 0.0
             );
-            world.replaceBoxBodies(
-                List.of(),
-                reverseCreationOrder ? List.of(lower, higher) : List.of(higher, lower)
-            );
+            V3TestSupport.attachCenteredUnitGrids(world,
+                reverseCreationOrder ? List.of(lower, higher) : List.of(higher, lower));
             return world.step(0, List.of(), List.of(), List.of(
                 new V3Query(30, -10.0, 0.0, 0.0, 0.25f, 0.25f, 0.25f, 1.0f, 0.0f, 0.0f),
                 new V3Query(10, 3.0, 0.0, 0.0, 0.25f, 0.25f, 0.25f, 0.0f, 0.0f, 0.0f),

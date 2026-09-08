@@ -242,6 +242,12 @@ B3_API b3BoxHull b3MakeBoxHull( float hx, float hy, float hz );
 /// Make an offset box as a hull. Do not call b3DestroyHull on this.
 B3_API b3BoxHull b3MakeOffsetBoxHull( float hx, float hy, float hz, b3Vec3 offset );
 
+/// Make an axis-aligned box as a hull. Do not call b3DestroyHull on this.
+/// The hash is left zero, so the result cannot be interned until it is hashed.
+/// @param halfExtent positive half widths
+/// @param center local center of box
+B3_API b3BoxHull b3MakeAxisAlignedBoxHull( b3Vec3 halfExtent, b3Vec3 center );
+
 /// Make a transformed box as a hull. Do not call b3DestroyHull on this.
 /// @param hx, hy, hz positive half widths
 /// @param transform local transform of box

@@ -908,6 +908,7 @@ void Sample::DrawMetrics()
 	{
 		ImGui::BeginChild( "##counters_scroll" );
 		b3Counters s = b3World_GetCounters( m_worldId );
+		v3BlockGridPairCounters pairCounters = v3World_GetBlockGridPairCounters( m_worldId );
 		constexpr int colorCount = sizeof( s.colorCounts ) / sizeof( s.colorCounts[0] );
 		const int overflowIndex = colorCount - 1;
 		constexpr int manifoldBucketCount = sizeof( s.manifoldCounts ) / sizeof( s.manifoldCounts[0] );
@@ -949,6 +950,10 @@ void Sample::DrawMetrics()
 			ImGui::SameLine();
 			ImGui::ProgressBar( frac, ImVec2( -FLT_MIN, 0.0f ), overlay );
 		}
+		ImGui::Text( "BlockGrid pair contacts = %llu", (unsigned long long)pairCounters.contactCount );
+		ImGui::Text( "BlockGrid candidate hitbox pairs = %llu", (unsigned long long)pairCounters.candidateHitboxPairCount );
+		ImGui::Text( "BlockGrid touching hitbox pairs built = %llu", (unsigned long long)pairCounters.touchingPairCount );
+		ImGui::Text( "BlockGrid pair scratch peak KiB = %.1f", (double)pairCounters.scratchPeakBytes / 1024.0 );
 		ImGui::Text( "islands/tasks = %d/%d", s.islandCount, s.taskCount );
 		ImGui::Text( "tree height static/movable = %d/%d", s.staticTreeHeight, s.treeHeight );
 		ImGui::Text( "sat call/hit = %d/%d", s.satCallCount, s.satCacheHitCount );

@@ -75,10 +75,15 @@ void b3DestroyGraph( b3ConstraintGraph* graph )
 
 // Contacts are always created as non-touching. They get cloned into the constraint
 // graph once they are found to be touching.
-void b3AddContactToGraph( b3World* world, b3Contact* contact )
+bool b3AddContactToGraph( b3World* world, b3Contact* contact )
 {
 	B3_ASSERT( contact->manifoldCount > 0 );
 	B3_ASSERT( contact->flags & b3_contactTouchingFlag );
+	if ( b3ContactStorageIsValid( contact ) == false )
+	{
+		B3_ASSERT( false );
+		return false;
+	}
 
 	b3ConstraintGraph* graph = &world->constraintGraph;
 	int colorIndex = B3_OVERFLOW_INDEX;
@@ -144,7 +149,7 @@ void b3AddContactToGraph( b3World* world, b3Contact* contact )
 	}
 #endif
 
-	bool isScalar = ( contact->flags & b3_simMeshContact ) || colorIndex == B3_OVERFLOW_INDEX;
+	bool isScalar = b3ContactKindUsesScalarSolver( (b3ContactKind)contact->kind ) || colorIndex == B3_OVERFLOW_INDEX;
 
 	b3GraphColor* color = graph->colors + colorIndex;
 	contact->colorIndex = colorIndex;
@@ -154,11 +159,10 @@ void b3AddContactToGraph( b3World* world, b3Contact* contact )
 
 	if ( isScalar )
 	{
-		B3_ASSERT( contact->manifoldCount < UINT16_MAX );
 		b3ContactSpec spec = {
 			.contactId = contact->contactId,
 			.manifoldStart = 0,
-			.manifoldCount = (uint16_t)contact->manifoldCount,
+			.manifoldCount = contact->manifoldCount,
 		};
 		b3Array_Push( color->contacts, spec );
 	}
@@ -166,9 +170,11 @@ void b3AddContactToGraph( b3World* world, b3Contact* contact )
 	{
 		b3Array_Push( color->convexContacts, contact->contactId );
 	}
+
+	return true;
 }
 
-void b3RemoveContactFromGraph( b3World* world, int bodyIdA, int bodyIdB, int colorIndex, int localIndex, bool meshContact )
+void b3RemoveContactFromGraph( b3World* world, int bodyIdA, int bodyIdB, int colorIndex, int localIndex, b3ContactKind kind )
 {
 	b3ConstraintGraph* graph = &world->constraintGraph;
 
@@ -182,7 +188,7 @@ void b3RemoveContactFromGraph( b3World* world, int bodyIdA, int bodyIdB, int col
 		b3ClearBit( &color->bodySet, bodyIdB );
 	}
 
-	if ( meshContact || colorIndex == B3_OVERFLOW_INDEX )
+	if ( b3ContactKindUsesScalarSolver( kind ) || colorIndex == B3_OVERFLOW_INDEX )
 	{
 		int movedIndex = b3Array_RemoveSwap( color->contacts, localIndex );
 		if ( movedIndex != B3_NULL_INDEX )
@@ -207,7 +213,7 @@ void b3RemoveContactFromGraph( b3World* world, int bodyIdA, int bodyIdB, int col
 			B3_ASSERT( movedContact->setIndex == b3_awakeSet );
 			B3_ASSERT( movedContact->colorIndex == colorIndex );
 			B3_ASSERT( movedContact->localIndex == movedIndex );
-			B3_ASSERT( ( movedContact->flags & b3_simMeshContact ) == 0 );
+			B3_ASSERT( b3ContactKindUsesScalarSolver( (b3ContactKind)movedContact->kind ) == false );
 			movedContact->localIndex = localIndex;
 		}
 	}

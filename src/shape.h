@@ -4,6 +4,7 @@
 #pragma once
 
 #include "math_internal.h"
+#include "block_grid/block_grid_shape.h"
 
 #include "box3d/types.h"
 
@@ -62,7 +63,8 @@ typedef struct b3Shape
 		b3Mesh mesh;
 		const b3HeightFieldData* heightField;
 		const b3CompoundData* compound;
-		const b3CompoundData* voxel;
+
+		struct v3BlockGridData* blockGrid;
 	};
 
 } b3Shape;
@@ -88,7 +90,7 @@ b3AABB b3ComputeSweptCapsuleAABB( const b3Capsule* shape, b3Transform xf1, b3Tra
 
 b3AABB b3ComputeShapeAABB( const b3Shape* shape, b3Transform transform );
 
-// Conservative world AABB for a shape inflated by extra margin. In double precision mode the
+// Conservative world AABB for a shape inflated by extra margin. The
 // box is built in the body local frame, translated by the double origin, and rounded outward.
 b3AABB b3ComputeFatShapeAABB( const b3Shape* shape, b3WorldTransform transform, float extra );
 b3AABB b3ComputeSweptShapeAABB( const b3Shape* shape, const b3Sweep* sweep, float time );
@@ -101,21 +103,46 @@ b3ShapeProxy b3MakeShapeProxy( const b3Shape* shape );
 b3ShapeProxy b3MakeLocalProxy( const b3ShapeProxy* proxy, b3Transform transform, b3Vec3* buffer );
 b3AABB b3ComputeProxyAABB( const b3ShapeProxy* proxy );
 
-b3CastOutput b3RayCastShape( const b3Shape* shape, b3Transform transform, const b3RayCastInput* input );
-b3CastOutput b3ShapeCastShape( const b3Shape* shape, b3Transform transform, const b3ShapeCastInput* input );
-bool b3OverlapShape( const b3Shape* shape, b3Transform transform, const b3ShapeProxy* proxy );
+// A BlockGrid shape narrows its field with a grid query, so these take the caller's
+// BlockGrid scratch. Every other shape type ignores it and NULL is fine for them.
+b3CastOutput b3RayCastShape( const b3Shape* shape, b3Transform transform, const b3RayCastInput* input,
+							 v3BlockGridScratch* gridScratch, int* blockGridHitboxIndex );
+b3CastOutput b3ShapeCastShape( const b3Shape* shape, b3Transform transform, const b3ShapeCastInput* input,
+							   v3BlockGridScratch* gridScratch, int* blockGridHitboxIndex );
+bool b3OverlapShape( const b3Shape* shape, b3Transform transform, const b3ShapeProxy* proxy, v3BlockGridScratch* gridScratch );
 
 float b3GetShapeArea( const b3Shape* shape );
 float b3GetShapeProjectedArea( const b3Shape* shape, b3Vec3 planeNormal );
-b3TOIOutput b3ShapeTimeOfImpact( b3Shape* shapeA, b3Shape* shapeB, b3Sweep* sweepA, b3Sweep* sweepB, float maxFraction );
+// The result of sweeping one fast convex shape against one other shape.
+typedef struct b3ShapeTOIResult
+{
+	b3TOIOutput output;
+
+	// A BlockGrid ran its bounded candidate traversal for this pair, so the caller
+	// counts one Projectile sweep.
+	bool sweptBlockGrid;
+
+	// The BlockGrid candidate cap stopped the traversal while an unvisited Hitbox
+	// could still be reached before the impact in output. Accepting that impact could
+	// carry the fast body through the Hitbox that was skipped, so the caller has to
+	// hold the body at holdFraction, with its velocity untouched, and ignore output.
+	bool capExhausted;
+	float holdFraction;
+} b3ShapeTOIResult;
+
+// blockGridCandidateCap bounds the Hitbox evaluations of one BlockGrid sweep; zero is
+// unlimited. gridScratch is the caller's BlockGrid scratch and is unused by every
+// other shape type.
+b3ShapeTOIResult b3ShapeTimeOfImpact( b3Shape* shapeA, b3Shape* shapeB, b3Sweep* sweepA, b3Sweep* sweepB, float maxFraction,
+									  int blockGridCandidateCap, v3BlockGridScratch* gridScratch );
 
 int b3CollideMoverAndSphere( b3PlaneResult* result, const b3Sphere* shape, const b3Capsule* mover );
 int b3CollideMoverAndCapsule( b3PlaneResult* result, const b3Capsule* shape, const b3Capsule* mover );
 int b3CollideMoverAndHull( b3PlaneResult* result, const b3HullData* shape, const b3Capsule* mover );
 int b3CollideMoverAndMesh( b3PlaneResult* planes, int capacity, const b3Mesh* shape, const b3Capsule* mover );
 int b3CollideMoverAndHeightField( b3PlaneResult* results, int capacity, const b3HeightFieldData* shape, const b3Capsule* mover );
-int b3CollideMover( b3PlaneResult* planes, int planeCapacity, const b3Shape* shape, b3Transform transform,
-					const b3Capsule* mover );
+int b3CollideMover( b3PlaneResult* planes, int planeCapacity, const b3Shape* shape, b3Transform transform, const b3Capsule* mover,
+					v3BlockGridScratch* gridScratch );
 
 // Hull
 int b3FindHullSupportVertex( const b3HullData* hull, b3Vec3 direction );

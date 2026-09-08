@@ -6,14 +6,19 @@
 #include "algorithm.h"
 #include "body.h"
 #include "compound.h"
+#include "constraint_graph.h"
 #include "island.h"
 #include "manifold.h"
 #include "physics_world.h"
 #include "shape.h"
 #include "solver_set.h"
 #include "table.h"
+#include "block_grid/block_grid.h"
+#include "block_grid/block_grid_shape.h"
 
 #include "box3d/box3d.h"
+
+#include <limits.h>
 
 // Contacts and determinism
 // A deterministic simulation requires contacts to exist in the same order in b3Island no matter the thread count.
@@ -104,6 +109,52 @@ struct b3ContactRegister
 static struct b3ContactRegister s_registers[b3_shapeTypeCount][b3_shapeTypeCount];
 static bool s_initialized = false;
 
+bool b3ContactStorageIsValid( const b3Contact* contact )
+{
+	if ( contact == NULL || contact->kind >= b3_contactKindCount || contact->reserved != 0 ||
+		 ( contact->manifoldCount == 0 ) != ( contact->manifolds == NULL ) )
+	{
+		return false;
+	}
+
+	b3ContactKind kind = (b3ContactKind)contact->kind;
+	if ( kind == v3_blockGridPairContactKind )
+	{
+		return v3BlockGridPairContactIsValid( contact );
+	}
+
+	if ( kind == b3_meshContactKind )
+	{
+		const b3Array( b3TriangleCache )* cache = &contact->meshContact.triangleCache;
+		return cache->count >= 0 && cache->capacity >= cache->count && ( cache->capacity == 0 ) == ( cache->data == NULL );
+	}
+
+	return kind == b3_convexContactKind;
+}
+
+bool b3DestroyContactStorage( b3World* world, b3Contact* contact )
+{
+	if ( world == NULL || b3ContactStorageIsValid( contact ) == false )
+	{
+		return false;
+	}
+
+	b3ContactKind kind = (b3ContactKind)contact->kind;
+	if ( kind == v3_blockGridPairContactKind )
+	{
+		return v3BlockGridPairClear( world, contact );
+	}
+
+	b3FreeManifolds( world, contact->manifolds, contact->manifoldCount );
+	contact->manifolds = NULL;
+	contact->manifoldCount = 0;
+	if ( kind == b3_meshContactKind )
+	{
+		b3Array_Destroy( contact->meshContact.triangleCache );
+	}
+	return true;
+}
+
 static void b3AddType( b3ShapeType type1, b3ShapeType type2 )
 {
 	B3_ASSERT( 0 <= type1 && type1 < b3_shapeTypeCount );
@@ -138,14 +189,19 @@ void b3InitializeContactRegisters( void )
 		b3AddType( b3_heightShape, b3_sphereShape );
 		b3AddType( b3_heightShape, b3_capsuleShape );
 		b3AddType( b3_heightShape, b3_hullShape );
-		b3AddType( b3_voxelShape, b3_sphereShape );
-		b3AddType( b3_voxelShape, b3_capsuleShape );
-		b3AddType( b3_voxelShape, b3_hullShape );
+
+		// The grid resolves a candidate hitbox into a box hull and runs the same
+		// convex manifold for sphere, capsule and hull contacts.
+		b3AddType( v3_blockGridShape, b3_sphereShape );
+		b3AddType( v3_blockGridShape, b3_capsuleShape );
+		b3AddType( v3_blockGridShape, b3_hullShape );
+
+		// BlockGrid pairs bypass this registration table. createBlockGridPairs controls their creation.
 		s_initialized = true;
 	}
 }
 
-void b3CreateContact( b3World* world, b3Shape* shapeA, b3Shape* shapeB, int childIndex )
+void b3CreateContact( b3World* world, b3Shape* shapeA, b3Shape* shapeB, int childIndex, bool createBlockGridPairs )
 {
 	b3ShapeType typeA = shapeA->type;
 	b3ShapeType typeB = shapeB->type;
@@ -153,16 +209,30 @@ void b3CreateContact( b3World* world, b3Shape* shapeA, b3Shape* shapeB, int chil
 	B3_ASSERT( 0 <= typeA && typeA < b3_shapeTypeCount );
 	B3_ASSERT( 0 <= typeB && typeB < b3_shapeTypeCount );
 
-	if ( s_registers[typeA][typeB].supported == false )
+	bool isBlockGridPair = typeA == v3_blockGridShape && typeB == v3_blockGridShape && childIndex == v3_blockGridPairChildIndex;
+	if ( isBlockGridPair )
+	{
+		if ( createBlockGridPairs == false )
+		{
+			return;
+		}
+		if ( shapeB->id < shapeA->id )
+		{
+			b3Shape* swap = shapeA;
+			shapeA = shapeB;
+			shapeB = swap;
+		}
+	}
+	else if ( s_registers[typeA][typeB].supported == false )
 	{
 		// For example, no mesh vs mesh collision
 		return;
 	}
 
-	if ( s_registers[typeA][typeB].primary == false )
+	if ( isBlockGridPair == false && s_registers[typeA][typeB].primary == false )
 	{
 		// flip order
-		b3CreateContact( world, shapeB, shapeA, childIndex );
+		b3CreateContact( world, shapeB, shapeA, childIndex, createBlockGridPairs );
 		return;
 	}
 
@@ -213,6 +283,17 @@ void b3CreateContact( b3World* world, b3Shape* shapeA, b3Shape* shapeB, int chil
 	contact->shapeIdA = shapeIdA;
 	contact->shapeIdB = shapeIdB;
 	contact->childIndex = childIndex;
+	contact->kind = b3_convexContactKind;
+	// BlockGrid payloads are immutable, so a new pair starts with its first source epochs
+	if ( isBlockGridPair && v3BlockGridPairInitializeContact( contact, 1, 1 ) == false )
+	{
+		contact->contactId = B3_NULL_INDEX;
+		contact->setIndex = B3_NULL_INDEX;
+		contact->colorIndex = B3_NULL_INDEX;
+		contact->localIndex = B3_NULL_INDEX;
+		b3FreeId( &world->contactIdPool, contactId );
+		return;
+	}
 
 	// Both bodies must enable recycling
 	if ( ( bodyA->flags & b3_bodyEnableContactRecycling ) != 0 && ( bodyB->flags & b3_bodyEnableContactRecycling ) != 0 )
@@ -220,23 +301,22 @@ void b3CreateContact( b3World* world, b3Shape* shapeA, b3Shape* shapeB, int chil
 		contact->flags |= b3_contactRecycleFlag;
 	}
 
-	if ( shapeA->type == b3_meshShape || shapeA->type == b3_heightShape )
+	if ( isBlockGridPair == false && ( shapeA->type == b3_meshShape || shapeA->type == b3_heightShape ) )
 	{
-		contact->flags |= b3_simMeshContact;
+		contact->kind = b3_meshContactKind;
 	}
-	else if ( shapeA->type == b3_compoundShape || shapeA->type == b3_voxelShape )
+	else if ( isBlockGridPair == false && shapeA->type == b3_compoundShape )
 	{
-		const b3CompoundData* compound =
-			shapeA->type == b3_compoundShape ? shapeA->compound : shapeA->voxel;
-		b3ChildShape child = b3GetCompoundChild( compound, childIndex );
+		b3ChildShape child = b3GetCompoundChild( shapeA->compound, childIndex );
 		if ( child.type == b3_meshShape )
 		{
-			contact->flags |= b3_simMeshContact;
+			contact->kind = b3_meshContactKind;
 		}
 	}
 
 	// todo impose these restrictions to make life easier
-	B3_ASSERT( shapeB->type == b3_sphereShape || shapeB->type == b3_capsuleShape || shapeB->type == b3_hullShape );
+	B3_ASSERT( isBlockGridPair || shapeB->type == b3_sphereShape || shapeB->type == b3_capsuleShape ||
+			   shapeB->type == b3_hullShape );
 	// B3_ASSERT( bodyB->type != b3_staticBody );
 
 	// Is either body static?
@@ -342,13 +422,15 @@ void b3CreateContact( b3World* world, b3Shape* shapeA, b3Shape* shapeB, int chil
 // - contact filtering is modified
 void b3DestroyContact( b3World* world, b3Contact* contact, bool wakeBodies )
 {
+	if ( b3DestroyContactStorage( world, contact ) == false )
+	{
+		B3_ASSERT( false );
+		return;
+	}
+
 	// Remove pair from set
 	uint64_t pairKey = b3ShapePairKey( contact->shapeIdA, contact->shapeIdB, contact->childIndex );
 	b3RemoveKey( &world->broadPhase.pairSet, pairKey );
-
-	b3FreeManifolds( world, contact->manifolds, contact->manifoldCount );
-	contact->manifolds = NULL;
-	contact->manifoldCount = 0;
 
 	b3ContactEdge* edgeA = contact->edges + 0;
 	b3ContactEdge* edgeB = contact->edges + 1;
@@ -434,11 +516,6 @@ void b3DestroyContact( b3World* world, b3Contact* contact, bool wakeBodies )
 
 	bodyB->contactCount -= 1;
 
-	if ( contact->flags & b3_simMeshContact )
-	{
-		b3Array_Destroy( contact->meshContact.triangleCache );
-	}
-
 	// Remove contact from the array that owns it
 	if ( contact->islandId != B3_NULL_INDEX )
 	{
@@ -449,8 +526,8 @@ void b3DestroyContact( b3World* world, b3Contact* contact, bool wakeBodies )
 	{
 		// contact is an active constraint
 		B3_ASSERT( contact->setIndex == b3_awakeSet );
-		bool meshContact = contact->flags & b3_simMeshContact;
-		b3RemoveContactFromGraph( world, bodyIdA, bodyIdB, contact->colorIndex, contact->localIndex, meshContact );
+		b3RemoveContactFromGraph( world, bodyIdA, bodyIdB, contact->colorIndex, contact->localIndex,
+								  (b3ContactKind)contact->kind );
 	}
 	else
 	{
@@ -473,12 +550,137 @@ void b3DestroyContact( b3World* world, b3Contact* contact, bool wakeBodies )
 	contact->setIndex = B3_NULL_INDEX;
 	contact->colorIndex = B3_NULL_INDEX;
 	contact->localIndex = B3_NULL_INDEX;
+	contact->kind = b3_convexContactKind;
+	contact->reserved = 0;
+	contact->convexContact = (b3ConvexContact){ 0 };
 	b3FreeId( &world->contactIdPool, contactId );
 
 	if ( wakeBodies && touching )
 	{
 		b3WakeBody( world, bodyA );
 		b3WakeBody( world, bodyB );
+	}
+}
+
+static bool b3BlockGridPairReplacementEventsCanFit( const b3World* world, int contactCapacity )
+{
+	if ( contactCapacity < 0 || contactCapacity > INT_MAX / (int)sizeof( b3ContactBeginTouchEvent ) )
+	{
+		return false;
+	}
+	for ( int slot = 0; slot < 2; ++slot )
+	{
+		int count = world->contactEndEvents[slot].count;
+		if ( count < 0 || count > INT_MAX - contactCapacity ||
+			 count + contactCapacity > INT_MAX / (int)sizeof( b3ContactEndTouchEvent ) )
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+void b3ResetBlockGridPairContactsForReplacement( b3World* world, b3Shape* shape )
+{
+	B3_ASSERT( world != NULL && shape != NULL && shape->type == v3_blockGridShape );
+	if ( world == NULL || shape == NULL || shape->type != v3_blockGridShape )
+	{
+		return;
+	}
+
+	int contactCapacity = world->contacts.count;
+	bool valid = b3BlockGridPairReplacementEventsCanFit( world, contactCapacity );
+	for ( int contactKey = world->bodies.data[shape->bodyId].headContactKey; valid && contactKey != B3_NULL_INDEX; )
+	{
+		const b3Contact* contact = b3Array_Get( world->contacts, contactKey >> 1 );
+		int edgeIndex = contactKey & 1;
+		contactKey = contact->edges[edgeIndex].nextKey;
+		if ( ( contact->shapeIdA == shape->id || contact->shapeIdB == shape->id ) &&
+			 contact->kind == v3_blockGridPairContactKind )
+		{
+			valid = v3BlockGridPairContactIsValid( contact ) &&
+					( contact->blockGridPair.state == NULL ||
+					  v3BlockGridPairStateBelongsToWorld( contact->blockGridPair.state, world ) );
+		}
+	}
+	B3_ASSERT( valid );
+	if ( valid == false )
+	{
+		return;
+	}
+
+	b3Array_Reserve( world->contactBeginEvents, contactCapacity );
+	for ( int slot = 0; slot < 2; ++slot )
+	{
+		int target = world->contactEndEvents[slot].count + contactCapacity;
+		b3Array_Reserve( world->contactEndEvents[slot], target );
+	}
+
+	b3Body* shapeBody = b3Array_Get( world->bodies, shape->bodyId );
+	int contactKey = shapeBody->headContactKey;
+	while ( contactKey != B3_NULL_INDEX )
+	{
+		int contactId = contactKey >> 1;
+		int edgeIndex = contactKey & 1;
+		b3Contact* contact = b3Array_Get( world->contacts, contactId );
+		contactKey = contact->edges[edgeIndex].nextKey;
+		if ( ( contact->shapeIdA != shape->id && contact->shapeIdB != shape->id ) ||
+			 contact->kind != v3_blockGridPairContactKind )
+		{
+			continue;
+		}
+
+		b3Body* bodyA = b3Array_Get( world->bodies, contact->edges[0].bodyId );
+		b3Body* bodyB = b3Array_Get( world->bodies, contact->edges[1].bodyId );
+		bool touching = ( contact->flags & b3_contactTouchingFlag ) != 0;
+		if ( touching && ( contact->flags & b3_contactEnableContactEvents ) != 0 )
+		{
+			const b3Shape* shapeA = b3Array_Get( world->shapes, contact->shapeIdA );
+			const b3Shape* shapeB = b3Array_Get( world->shapes, contact->shapeIdB );
+			b3ContactEndTouchEvent event = {
+				.shapeIdA = { shapeA->id + 1, world->worldId, shapeA->generation },
+				.shapeIdB = { shapeB->id + 1, world->worldId, shapeB->generation },
+				.contactId = { contact->contactId + 1, world->worldId, 0, contact->generation },
+			};
+			b3Array_Push( world->contactEndEvents[world->endEventArrayIndex], event );
+		}
+
+		b3WakeBody( world, bodyA );
+		b3WakeBody( world, bodyB );
+		if ( touching )
+		{
+			B3_ASSERT( contact->setIndex == b3_awakeSet && contact->colorIndex != B3_NULL_INDEX &&
+					   contact->islandId != B3_NULL_INDEX );
+			int colorIndex = contact->colorIndex;
+			int localIndex = contact->localIndex;
+			int bodyIdA = contact->edges[0].bodyId;
+			int bodyIdB = contact->edges[1].bodyId;
+			b3UnlinkContact( world, contact );
+
+			b3SolverSet* awakeSet = b3Array_Get( world->solverSets, b3_awakeSet );
+			contact->colorIndex = B3_NULL_INDEX;
+			contact->localIndex = awakeSet->contactIndices.count;
+			b3Array_Push( awakeSet->contactIndices, contact->contactId );
+			b3RemoveContactFromGraph( world, bodyIdA, bodyIdB, colorIndex, localIndex, (b3ContactKind)contact->kind );
+		}
+
+		contact->bodySimIndexA = B3_NULL_INDEX;
+		contact->bodySimIndexB = B3_NULL_INDEX;
+		uint32_t persistentFlags =
+			contact->flags & ( b3_contactEnableContactEvents | b3_contactStaticFlag | b3_contactRecycleFlag |
+							   b3_simEnablePreSolveEvents | b3_enableSpeculativePoints );
+		contact->flags = persistentFlags;
+		contact->cachedRotationA = b3Quat_identity;
+		contact->cachedRotationB = b3Quat_identity;
+		contact->cachedRelativePose = b3Transform_identity;
+		contact->friction = 0.0f;
+		contact->restitution = 0.0f;
+		contact->rollingResistance = 0.0f;
+		contact->tangentVelocity = b3Vec3_zero;
+		contact->generation += 1;
+		bool retained = v3BlockGridPairRetainCapacityForReplacement( contact );
+		B3_ASSERT( retained );
+		B3_UNUSED( retained );
 	}
 }
 
@@ -617,6 +819,84 @@ static bool b3ComputeConvexManifold( b3World* world, int workerIndex, b3Contact*
 	return true;
 }
 
+bool b3ResolveContactMaterial( const b3World* world, const b3SurfaceMaterial* materialA, b3Quat rotationA,
+							   const b3SurfaceMaterial* materialB, b3Quat rotationB, float effectiveRadius,
+							   b3ContactMaterial* contactMaterial )
+{
+	if ( world == NULL || materialA == NULL || materialB == NULL || contactMaterial == NULL ||
+		 b3IsValidFloat( effectiveRadius ) == false || effectiveRadius < 0.0f )
+	{
+		return false;
+	}
+
+	float friction =
+		world->frictionCallback( materialA->friction, materialA->userMaterialId, materialB->friction, materialB->userMaterialId );
+	float restitution = world->restitutionCallback( materialA->restitution, materialA->userMaterialId, materialB->restitution,
+													materialB->userMaterialId );
+	float rollingResistance = b3MaxFloat( materialA->rollingResistance, materialB->rollingResistance ) * effectiveRadius;
+	b3Vec3 tangentVelocityA = b3RotateVector( rotationA, materialA->tangentVelocity );
+	b3Vec3 tangentVelocityB = b3RotateVector( rotationB, materialB->tangentVelocity );
+	b3Vec3 tangentVelocity = b3Sub( tangentVelocityA, tangentVelocityB );
+	if ( b3IsValidFloat( friction ) == false || friction < 0.0f || b3IsValidFloat( restitution ) == false || restitution < 0.0f ||
+		 b3IsValidFloat( rollingResistance ) == false || b3IsValidVec3( tangentVelocity ) == false )
+	{
+		return false;
+	}
+
+	*contactMaterial = (b3ContactMaterial){
+		.friction = friction,
+		.restitution = restitution,
+		.rollingResistance = rollingResistance,
+		.tangentVelocity = tangentVelocity,
+	};
+	return true;
+}
+
+static float b3GetConvexRollingRadius( const b3Shape* shape )
+{
+	switch ( shape->type )
+	{
+		case b3_sphereShape:
+			return shape->sphere.radius;
+		case b3_capsuleShape:
+			return shape->capsule.radius;
+		case b3_hullShape:
+			return 0.25f * shape->hull->innerRadius;
+		default:
+			return 0.0f;
+	}
+}
+
+static void b3UpdateHitEventFlag( b3Contact* contact, const b3Shape* shapeA, const b3Shape* shapeB, bool touching )
+{
+	if ( touching && ( ( shapeA->flags & b3_enableHitEvents ) || ( shapeB->flags & b3_enableHitEvents ) ) )
+	{
+		contact->flags |= b3_simEnableHitEvent;
+	}
+	else
+	{
+		contact->flags &= ~b3_simEnableHitEvent;
+	}
+}
+
+static bool v3BlockGridPairPassesPreSolve( b3World* world, const b3Contact* contact, const b3Shape* shapeA, b3Vec3 localCenterA,
+										   b3WorldTransform transformA, const b3Shape* shapeB )
+{
+	if ( world->preSolveFcn == NULL || ( contact->flags & b3_simEnablePreSolveEvents ) == 0 )
+	{
+		return true;
+	}
+
+	B3_ASSERT( contact->manifoldCount > 0 && contact->manifolds[0].pointCount > 0 );
+	b3ShapeId shapeIdA = { shapeA->id + 1, world->worldId, shapeA->generation };
+	b3ShapeId shapeIdB = { shapeB->id + 1, world->worldId, shapeB->generation };
+	b3Pos centerA = b3OffsetPos( transformA.p, b3RotateVector( transformA.q, localCenterA ) );
+	b3Pos point = b3OffsetPos( centerA, contact->manifolds[0].points[0].anchorA );
+
+	// Sorted manifolds make the first point a stable parent-level callback
+	return world->preSolveFcn( shapeIdA, shapeIdB, point, contact->manifolds[0].normal, world->preSolveContext );
+}
+
 static bool b3UpdateConvexContact( b3World* world, int workerIndex, b3Contact* contact, b3Shape* shapeA, b3WorldTransform xfA,
 								   b3Shape* shapeB, b3WorldTransform xfB, bool flip, b3Arena arena )
 {
@@ -647,56 +927,24 @@ static bool b3UpdateConvexContact( b3World* world, int workerIndex, b3Contact* c
 	const b3SurfaceMaterial* materialA = b3GetShapeMaterials( shapeA );
 	const b3SurfaceMaterial* materialB = b3GetShapeMaterials( shapeB );
 
-	// Keep these updated in case the values on the shapes are modified
-	contact->friction =
-		world->frictionCallback( materialA->friction, materialA->userMaterialId, materialB->friction, materialB->userMaterialId );
-	contact->restitution = world->restitutionCallback( materialA->restitution, materialA->userMaterialId, materialB->restitution,
-													   materialB->userMaterialId );
-
+	float effectiveRadius = 0.0f;
 	if ( materialA->rollingResistance > 0.0f || materialB->rollingResistance > 0.0f )
 	{
-		b3ShapeType typeA = shapeA->type;
-		b3ShapeType typeB = shapeB->type;
-
-		float radiusA = 0.0f;
-		if ( typeA == b3_sphereShape )
-		{
-			radiusA = shapeA->sphere.radius;
-		}
-		else if ( typeA == b3_capsuleShape )
-		{
-			radiusA = shapeA->capsule.radius;
-		}
-		else if ( typeA == b3_hullShape )
-		{
-			radiusA = 0.25f * shapeA->hull->innerRadius;
-		}
-
-		float radiusB = 0.0f;
-		if ( typeB == b3_sphereShape )
-		{
-			radiusB = shapeB->sphere.radius;
-		}
-		else if ( typeB == b3_capsuleShape )
-		{
-			radiusB = shapeB->capsule.radius;
-		}
-		else if ( typeB == b3_hullShape )
-		{
-			radiusB = 0.25f * shapeB->hull->innerRadius;
-		}
-
-		float maxRadius = b3MaxFloat( radiusA, radiusB );
-		contact->rollingResistance = b3MaxFloat( materialA->rollingResistance, materialB->rollingResistance ) * maxRadius;
+		effectiveRadius = b3MaxFloat( b3GetConvexRollingRadius( shapeA ), b3GetConvexRollingRadius( shapeB ) );
 	}
-	else
+
+	b3ContactMaterial contactMaterial;
+	if ( b3ResolveContactMaterial( world, materialA, xfA.q, materialB, xfB.q, effectiveRadius, &contactMaterial ) == false )
 	{
-		contact->rollingResistance = 0.0f;
+		b3FreeManifolds( world, contact->manifolds, contact->manifoldCount );
+		contact->manifolds = NULL;
+		contact->manifoldCount = 0;
+		return false;
 	}
-
-	b3Vec3 tangentVelocityA = b3RotateVector( xfA.q, materialA->tangentVelocity );
-	b3Vec3 tangentVelocityB = b3RotateVector( xfB.q, materialB->tangentVelocity );
-	contact->tangentVelocity = b3Sub( tangentVelocityA, tangentVelocityB );
+	contact->friction = contactMaterial.friction;
+	contact->restitution = contactMaterial.restitution;
+	contact->rollingResistance = contactMaterial.rollingResistance;
+	contact->tangentVelocity = contactMaterial.tangentVelocity;
 
 	if ( world->preSolveFcn && ( contact->flags & b3_simEnablePreSolveEvents ) != 0 )
 	{
@@ -717,34 +965,90 @@ static bool b3UpdateConvexContact( b3World* world, int workerIndex, b3Contact* c
 		}
 	}
 
-	if ( ( shapeA->flags & b3_enableHitEvents ) || ( shapeB->flags & b3_enableHitEvents ) )
-	{
-		contact->flags |= b3_simEnableHitEvent;
-	}
-	else
-	{
-		contact->flags &= ~b3_simEnableHitEvent;
-	}
-
 	return true;
 }
 
-// Update the contact manifold and touching status.
-// Note: do not assume the shape AABBs are overlapping or are valid.
-bool b3UpdateContact( b3World* world, int workerIndex, b3Contact* contact, b3Shape* shapeA, b3Vec3 localCenterA,
-					  b3WorldTransform xfA, b3Shape* shapeB, b3Vec3 localCenterB, b3WorldTransform xfB, bool isFast,
-					  b3Arena arena )
+// Update the contact manifold and touching status
+// The caller must not assume that the shape AABBs overlap or are valid
+b3ContactUpdateResult b3UpdateContact( b3World* world, int workerIndex, b3Contact* contact, b3Shape* shapeA, b3Vec3 localCenterA,
+									   b3WorldTransform xfA, b3Shape* shapeB, b3Vec3 localCenterB, b3WorldTransform xfB,
+									   bool isFast, b3Arena arena )
 {
+	if ( contact->kind == v3_blockGridPairContactKind )
+	{
+		// Aggregate manifolds already store center-of-mass anchors, so this phase only publishes their touch state
+		b3ContactUpdateResult result = { .touching = ( contact->flags & b3_simTouchingFlag ) != 0 };
+		if ( shapeA->type != v3_blockGridShape || shapeB->type != v3_blockGridShape ||
+			 v3BlockGridPairContactIsValid( contact ) == false || contact->blockGridPair.sourceEpochA == 0 ||
+			 contact->blockGridPair.sourceEpochB == 0 )
+		{
+			return result;
+		}
+
+		v3BlockGridPairOutcome outcome = (v3BlockGridPairOutcome)contact->blockGridPair.lastOutcome;
+		bool completedSeparated = outcome == v3_blockGridPairOutcomeSeparated && contact->manifoldCount == 0;
+		bool completedTouching = outcome == v3_blockGridPairOutcomeTouching && contact->manifoldCount > 0;
+		if ( completedSeparated == false && completedTouching == false )
+		{
+			// The pair update has not reached this contact this step, so its touch state stands
+			return result;
+		}
+
+		result.touching = completedTouching;
+		if ( result.touching && v3BlockGridPairPassesPreSolve( world, contact, shapeA, localCenterA, xfA, shapeB ) == false )
+		{
+			// The pair still overlaps, but the callback removes it from the solver for this step
+			if ( v3BlockGridPairClear( world, contact ) == false )
+			{
+				return result;
+			}
+			result.touching = false;
+		}
+		if ( result.touching )
+		{
+			contact->flags |= b3_simTouchingFlag;
+		}
+		else
+		{
+			contact->flags &= ~b3_simTouchingFlag;
+		}
+		b3UpdateHitEventFlag( contact, shapeA, shapeB, result.touching );
+		result.completed = true;
+		return result;
+	}
+
 	bool touching;
 
-	B3_ASSERT( shapeB->type != b3_compoundShape && shapeB->type != b3_voxelShape );
+	B3_ASSERT( shapeB->type != b3_compoundShape && shapeB->type != v3_blockGridShape );
 
-	if ( shapeA->type == b3_compoundShape || shapeA->type == b3_voxelShape )
+	if ( shapeA->type == v3_blockGridShape )
+	{
+		// Resolve the contact hitbox into a temporary box hull and run the convex manifold function.
+		int hitboxIndex = contact->childIndex;
+		b3BoxHull box = v3MakeBlockGridHitboxHull( shapeA->blockGrid, hitboxIndex );
+
+		b3Shape childShapeA;
+		memcpy( &childShapeA, shapeA, sizeof( b3Shape ) );
+		childShapeA.type = b3_hullShape;
+		childShapeA.hull = &box.base;
+
+		// Hitbox material, so a grid may mix surfaces the way a compound does.
+		uint32_t materialIndex = v3BlockGrid_GetHitboxMaterial( shapeA->blockGrid, hitboxIndex );
+		const b3SurfaceMaterial* parentMaterials = b3GetShapeMaterials( shapeA );
+		if ( materialIndex < (uint32_t)shapeA->materialCount )
+		{
+			childShapeA.material = parentMaterials[materialIndex];
+		}
+		childShapeA.materials = NULL;
+		childShapeA.materialCount = 1;
+
+		bool flip = false;
+		touching = b3UpdateConvexContact( world, workerIndex, contact, &childShapeA, xfA, shapeB, xfB, flip, arena );
+	}
+	else if ( shapeA->type == b3_compoundShape )
 	{
 		int childIndex = contact->childIndex;
-		const b3CompoundData* compound =
-			shapeA->type == b3_compoundShape ? shapeA->compound : shapeA->voxel;
-		b3ChildShape child = b3GetCompoundChild( compound, childIndex );
+		b3ChildShape child = b3GetCompoundChild( shapeA->compound, childIndex );
 
 		// Temporary child shape to match existing function signatures
 		b3Shape childShapeA;
@@ -792,15 +1096,6 @@ bool b3UpdateContact( b3World* world, int workerIndex, b3Contact* contact, b3Sha
 			touching = b3ComputeMeshManifolds( world, workerIndex, contact, &childShapeA, child.materialIndices, xfChild, shapeB,
 											   xfB, isFast, arena );
 
-			if ( touching && ( ( shapeA->flags & b3_enableHitEvents ) || ( shapeB->flags & b3_enableHitEvents ) ) )
-			{
-				contact->flags |= b3_simEnableHitEvent;
-			}
-			else
-			{
-				contact->flags &= ~b3_simEnableHitEvent;
-			}
-
 			B3_ASSERT( ( touching == true && contact->manifoldCount > 0 ) ||
 					   ( touching == false && contact->manifoldCount == 0 ) );
 		}
@@ -844,15 +1139,6 @@ bool b3UpdateContact( b3World* world, int workerIndex, b3Contact* contact, b3Sha
 		// Compute mesh manifolds
 		touching = b3ComputeMeshManifolds( world, workerIndex, contact, shapeA, NULL, xfA, shapeB, xfB, isFast, arena );
 
-		if ( touching && ( ( shapeA->flags & b3_enableHitEvents ) || ( shapeB->flags & b3_enableHitEvents ) ) )
-		{
-			contact->flags |= b3_simEnableHitEvent;
-		}
-		else
-		{
-			contact->flags &= ~b3_simEnableHitEvent;
-		}
-
 		B3_ASSERT( ( touching == true && contact->manifoldCount > 0 ) || ( touching == false && contact->manifoldCount == 0 ) );
 	}
 	else
@@ -885,6 +1171,7 @@ bool b3UpdateContact( b3World* world, int workerIndex, b3Contact* contact, b3Sha
 	{
 		contact->flags &= ~b3_simTouchingFlag;
 	}
+	b3UpdateHitEventFlag( contact, shapeA, shapeB, touching );
 
-	return touching;
+	return (b3ContactUpdateResult){ .touching = touching, .completed = true };
 }

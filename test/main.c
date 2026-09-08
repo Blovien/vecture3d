@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "test_macros.h"
+
 #include "box3d/base.h"
 
 #include <string.h>
@@ -42,13 +43,23 @@ extern int JointTest( void );
 extern int LargeWorldTest( void );
 extern int ManifoldTest( void );
 extern int MathTest( void );
+extern int MeshTest( void );
 extern int MoverTest( void );
 extern int NameCacheTest( void );
 extern int RecordingTest( void );
 extern int SeparatingAxisTest( void );
 extern int ShapeTest( void );
 extern int TableTest( void );
-extern int V3VoxelTest( void );
+extern int V3BlockGridContactsTest( void );
+extern int V3BlockGridWorldTest( void );
+extern int V3BlockGridLandingTest( void );
+extern int V3BlockGridReplaceTest( void );
+extern int V3BlockGridSweepTest( void );
+extern int V3BlockGridMotionTest( void );
+extern int V3BlockGridEventsTest( void );
+extern int V3BlockGridCastsTest( void );
+extern int V3BlockGridEntryTest( void );
+extern int V3WorldLimitsTest( void );
 extern int WorldTest( void );
 
 // Filter-aware test runner: skips tests that don't match the filter
@@ -117,13 +128,23 @@ int main( int argc, char** argv )
 	MAYBE_RUN_TEST( LargeWorldTest );
 	MAYBE_RUN_TEST( ManifoldTest );
 	MAYBE_RUN_TEST( MathTest );
+	MAYBE_RUN_TEST( MeshTest );
 	MAYBE_RUN_TEST( MoverTest );
 	MAYBE_RUN_TEST( NameCacheTest );
 	MAYBE_RUN_TEST( RecordingTest );
 	MAYBE_RUN_TEST( SeparatingAxisTest );
 	MAYBE_RUN_TEST( ShapeTest );
 	MAYBE_RUN_TEST( TableTest );
-	MAYBE_RUN_TEST( V3VoxelTest );
+	MAYBE_RUN_TEST( V3BlockGridContactsTest );
+	MAYBE_RUN_TEST( V3BlockGridWorldTest );
+	MAYBE_RUN_TEST( V3BlockGridLandingTest );
+	MAYBE_RUN_TEST( V3BlockGridReplaceTest );
+	MAYBE_RUN_TEST( V3BlockGridSweepTest );
+	MAYBE_RUN_TEST( V3BlockGridMotionTest );
+	MAYBE_RUN_TEST( V3BlockGridEventsTest );
+	MAYBE_RUN_TEST( V3BlockGridCastsTest );
+	MAYBE_RUN_TEST( V3BlockGridEntryTest );
+	MAYBE_RUN_TEST( V3WorldLimitsTest );
 	MAYBE_RUN_TEST( WorldTest );
 
 	printf( "======================================\n" );

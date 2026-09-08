@@ -14,7 +14,7 @@
 //   0x20-0x3F  body mutators
 //   0x40-0x4F  shape create/destroy
 //   0x50-0x6F  shape mutators
-//   0x80       step
+//   0x80-0x8F  steps
 //   0x90-0xE7  joints (create, generic, per-type)
 //   0xE8-0xEF  spatial queries
 //   0xF0-0xFF  markers
@@ -38,6 +38,8 @@ B3_REC_OP( 0x0A, WorldSetMaximumLinearSpeed, RET_NONE, ARG( WORLDID, world ) ARG
 B3_REC_OP( 0x0B, WorldEnableWarmStarting, RET_NONE, ARG( WORLDID, world ) ARG( BOOL, flag ) )
 B3_REC_OP( 0x0C, WorldRebuildStaticTree, RET_NONE, ARG( WORLDID, world ) )
 B3_REC_OP( 0x0D, WorldEnableSpeculative, RET_NONE, ARG( WORLDID, world ) ARG( BOOL, flag ) )
+B3_REC_OP( 0x0E, WorldSetMaximumAngularSpeed, RET_NONE, ARG( WORLDID, world ) ARG( F32, maximumAngularSpeed ) )
+B3_REC_OP( 0x0F, WorldSetProjectileCandidateCap, RET_NONE, ARG( WORLDID, world ) ARG( I32, projectileCandidateCap ) )
 
 // Body
 B3_REC_OP( 0x10, CreateBody, RET_BODYID, ARG( WORLDID, world ) ARG( BODYDEF, def ) )
@@ -69,6 +71,7 @@ B3_REC_OP( 0x37, BodySetBullet, RET_NONE, ARG( BODYID, body ) ARG( BOOL, flag ) 
 B3_REC_OP( 0x38, BodyEnableContactRecycling, RET_NONE, ARG( BODYID, body ) ARG( BOOL, flag ) )
 B3_REC_OP( 0x39, BodyEnableHitEvents, RET_NONE, ARG( BODYID, body ) ARG( BOOL, flag ) )
 B3_REC_OP( 0x3A, BodyAllowFastRotation, RET_NONE, ARG( BODYID, body ) ARG( BOOL, flag ) )
+B3_REC_OP( 0x3B, BodySetSafetyFactor, RET_NONE, ARG( BODYID, body ) ARG( F32, value ) )
 
 // Shape create/destroy
 B3_REC_OP( 0x40, CreateSphereShape, RET_SHAPEID, ARG( BODYID, body ) ARG( SHAPEDEF, def ) ARG( SPHERE, sphere ) )
@@ -78,6 +81,10 @@ B3_REC_OP( 0x43, CreateMeshShape, RET_SHAPEID, ARG( BODYID, body ) ARG( SHAPEDEF
 B3_REC_OP( 0x44, CreateHeightFieldShape, RET_SHAPEID, ARG( BODYID, body ) ARG( SHAPEDEF, def ) ARG( GEOMID, geometryId ) )
 B3_REC_OP( 0x45, CreateCompoundShape, RET_SHAPEID, ARG( BODYID, body ) ARG( SHAPEDEF, def ) ARG( GEOMID, geometryId ) )
 B3_REC_OP( 0x46, DestroyShape, RET_NONE, ARG( SHAPEID, shape ) ARG( BOOL, updateBodyMass ) )
+// Store placement with the operation because interned geometry has its placement fields zeroed.
+B3_REC_OP( 0x47, CreateBlockGridShape, RET_SHAPEID,
+		   ARG( BODYID, body ) ARG( SHAPEDEF, def ) ARG( GEOMID, geometryId ) ARG( I32, originX ) ARG( I32, originY )
+			   ARG( I32, originZ ) ARG( I32, placement ) )
 
 // Shape mutators
 B3_REC_OP( 0x50, ShapeSetDensity, RET_NONE, ARG( SHAPEID, shape ) ARG( F32, density ) ARG( BOOL, updateBodyMass ) )
@@ -96,6 +103,10 @@ B3_REC_OP( 0x5C, ShapeSetName, RET_NONE, ARG( SHAPEID, shape ) ARG( STR, name ) 
 B3_REC_OP( 0x5D, ShapeSetMeshMaterial, RET_NONE, ARG( SHAPEID, shape ) ARG( MATERIAL, material ) ARG( I32, index ) )
 B3_REC_OP( 0x5E, ShapeSetHull, RET_NONE, ARG( SHAPEID, shape ) ARG( GEOMID, geometryId ) )
 B3_REC_OP( 0x5F, ShapeSetMesh, RET_NONE, ARG( SHAPEID, shape ) ARG( GEOMID, geometryId ) ARG( VEC3, scale ) )
+// Store placement with the operation because interned geometry has its placement fields zeroed.
+B3_REC_OP( 0x60, ReplaceBlockGridShape, RET_NONE,
+		   ARG( SHAPEID, shape ) ARG( GEOMID, geometryId ) ARG( I32, originX ) ARG( I32, originY ) ARG( I32, originZ )
+			   ARG( I32, placement ) ARG( BOOL, updateBodyMass ) )
 
 // Joint create and destroy
 B3_REC_OP( 0x90, CreateParallelJoint, RET_JOINTID, ARG( WORLDID, world ) ARG( PARALLELJOINTDEF, def ) )
@@ -233,3 +244,5 @@ B3_REC_OP( 0xF1, StateHash, RET_NONE, ARG( WORLDID, world ) ARG( U64, hash ) )
 
 // Accumulated world bounds over the whole recording, written once at stop.
 B3_REC_OP( 0xF2, RecordingBounds, RET_NONE, ARG( AABB, bounds ) )
+B3_REC_OP( 0xF3, ContactEventHash, RET_NONE, ARG( WORLDID, world ) ARG( U64, hash ) )
+B3_REC_OP( 0xF4, BlockGridCountersHash, RET_NONE, ARG( WORLDID, world ) ARG( U64, hash ) )

@@ -399,7 +399,9 @@ b3CompoundData* b3CreateCompound( const b3CompoundDef* def )
 			// No effort to share mesh materials. It would be easier to do if the number of materials was limited.
 			B3_ASSERT( meshData->materialCount == meshDef->materialCount );
 
-			for ( int j = 0; j < meshDef->materialCount; ++j )
+			int meshMaterialCount = b3MinInt( meshDef->materialCount, B3_MAX_COMPOUND_MESH_MATERIALS );
+
+			for ( int j = 0; j < meshMaterialCount; ++j )
 			{
 				// Look for an existing material.
 				b3MaterialMap_itr materialItr =
@@ -575,8 +577,11 @@ b3CompoundData* b3CreateCompound( const b3CompoundDef* def )
 		hullInstances[i].hullOffset = sharedHulls[sharedIndex].hullOffset;
 	}
 
-	b3HullInstance* destinationHullInstances = (b3HullInstance*)( (intptr_t)compound + hullArrayOffset );
-	memcpy( destinationHullInstances, hullInstances, hullCount * sizeof( b3HullInstance ) );
+	if ( hullCount > 0 )
+	{
+		b3HullInstance* destinationHullInstances = (b3HullInstance*)( (intptr_t)compound + hullArrayOffset );
+		memcpy( destinationHullInstances, hullInstances, hullCount * sizeof( b3HullInstance ) );
+	}
 
 	for ( int i = 0; i < sharedHullCount; ++i )
 	{
@@ -596,8 +601,11 @@ b3CompoundData* b3CreateCompound( const b3CompoundDef* def )
 		meshInstances[i].meshOffset = sharedMeshes[sharedIndex].meshOffset;
 	}
 
-	b3MeshInstance* destinationMeshInstances = (b3MeshInstance*)( (intptr_t)compound + meshArrayOffset );
-	memcpy( destinationMeshInstances, meshInstances, meshCount * sizeof( b3MeshInstance ) );
+	if ( meshCount > 0 )
+	{
+		b3MeshInstance* destinationMeshInstances = (b3MeshInstance*)( (intptr_t)compound + meshArrayOffset );
+		memcpy( destinationMeshInstances, meshInstances, meshCount * sizeof( b3MeshInstance ) );
+	}
 
 	for ( int i = 0; i < sharedMeshCount; ++i )
 	{
@@ -1168,6 +1176,10 @@ static bool b3CompoundMoverCallback( int proxyId, uint64_t userData, void* conte
 	{
 		planes[i].plane.normal = b3RotateVector( child.transform.q, planes[i].plane.normal );
 		planes[i].point = b3TransformPoint( child.transform, planes[i].point );
+
+		planes[i].childIndex = childIndex;
+		int childMaterialIndex = b3MinInt( planes[i].materialIndex, B3_MAX_COMPOUND_MESH_MATERIALS - 1 );
+		planes[i].materialIndex = child.materialIndices[childMaterialIndex];
 	}
 
 	moverContext->planeCount += planeCount;

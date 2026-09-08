@@ -8,9 +8,9 @@ import java.nio.file.Paths
 import java.security.MessageDigest
 
 def projectRoot = rootProject.layout.projectDirectory.asFile.toPath()
-def publicHeader = projectRoot.resolve('ffi-java/src/main/public/v3_abi.h')
-def checkedManifest = projectRoot.resolve('ffi-java/src/main/abi/v3_abi_manifest.json')
-def checkedManifestHeader = projectRoot.resolve('ffi-java/src/main/public/v3_abi_manifest.h')
+def publicHeader = projectRoot.resolve('abi/include/vecture3d/abi.h')
+def checkedManifest = projectRoot.resolve('abi/abi_manifest.json')
+def checkedManifestHeader = projectRoot.resolve('abi/include/vecture3d/abi_manifest.h')
 
 def runClang = { List<String> arguments ->
     def command = ['clang'] + arguments
@@ -162,7 +162,7 @@ def parseNumericConstants = { String macroOutput ->
 }
 
 def renderManifestHeader = { String hashHex ->
-    """// Generated from v3_abi.h by ./gradlew updateAbiManifest. Do not edit manually.
+    """// Generated from abi.h by ./gradlew updateAbiManifest. Do not edit manually.
 #ifndef V3_ABI_MANIFEST_H
 #define V3_ABI_MANIFEST_H
 
@@ -191,7 +191,7 @@ def generateManifest = { Path manifestPath, Path manifestHeaderPath ->
     Map manifest = [
         _generated: [
             notice: 'Generated file. Do not edit manually.',
-            source: 'ffi-java/src/main/public/v3_abi.h',
+            source: 'abi/include/vecture3d/abi.h',
             command: './gradlew updateAbiManifest'
         ] as LinkedHashMap,
         format: 1,
@@ -252,16 +252,16 @@ tasks.register('checkAbiManifest') {
         }
 
         Path temporaryDirectory = layout.buildDirectory.dir('tmp/abiManifest/check').get().asFile.toPath()
-        Path temporaryManifest = temporaryDirectory.resolve('v3_abi_manifest.json')
-        Path temporaryHeader = temporaryDirectory.resolve('v3_abi_manifest.h')
+        Path temporaryManifest = temporaryDirectory.resolve('abi_manifest.json')
+        Path temporaryHeader = temporaryDirectory.resolve('abi_manifest.h')
         generateManifest(temporaryManifest, temporaryHeader)
         assertManifestPreservesRecordTypedefPair(temporaryManifest)
 
         if (Files.mismatch(checkedManifest, temporaryManifest) != -1L) {
-            throw new GradleException('v3_abi_manifest.json is stale; run ./gradlew updateAbiManifest')
+            throw new GradleException('abi_manifest.json is stale; run ./gradlew updateAbiManifest')
         }
         if (Files.mismatch(checkedManifestHeader, temporaryHeader) != -1L) {
-            throw new GradleException('v3_abi_manifest.h is stale; run ./gradlew updateAbiManifest')
+            throw new GradleException('abi_manifest.h is stale; run ./gradlew updateAbiManifest')
         }
     }
 }

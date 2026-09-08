@@ -2655,7 +2655,7 @@ int b3CollideMoverAndHull( b3PlaneResult* result, const b3HullData* shape, const
 	if ( distanceOutput.distance <= totalRadius )
 	{
 		b3Plane plane = { distanceOutput.normal, totalRadius - distanceOutput.distance };
-		*result = (b3PlaneResult){ plane, distanceOutput.pointA };
+		*result = (b3PlaneResult){ plane, distanceOutput.pointA, 0, 0, 0 };
 		return 1;
 	}
 
@@ -2777,8 +2777,7 @@ b3BoxHull b3MakeTransformedBoxHull( float hx, float hy, float hz, b3Transform tr
 
 	b3BoxHull boxHull = s_boxHull;
 
-	float minH = 0.2f * B3_LINEAR_SLOP;
-	b3Vec3 h = b3Max( (b3Vec3){ minH, minH, minH }, (b3Vec3){ hx, hy, hz } );
+	b3Vec3 h = b3ClampBoxHalfExtent( (b3Vec3){ hx, hy, hz } );
 
 	boxHull.base.aabb = b3AABB_Transform( transform, (b3AABB){ b3Neg( h ), h } );
 	boxHull.base.surfaceArea = 8.0f * ( h.x * h.y + h.x * h.z + h.y * h.z );
@@ -2879,6 +2878,62 @@ b3BoxHull b3MakeOffsetBoxHull( float hx, float hy, float hz, b3Vec3 offset )
 {
 	b3Transform transform = { .p = offset, .q = b3Quat_identity };
 	return b3MakeTransformedBoxHull( hx, hy, hz, transform );
+}
+
+// Same hull as b3MakeOffsetBoxHull, but with no transform to apply: planes,
+// points, and inertia are written directly. Grids build one hull per candidate
+// hitbox per pair, so this is per-pair cost.
+b3BoxHull b3MakeAxisAlignedBoxHull( b3Vec3 halfExtent, b3Vec3 center )
+{
+	b3BoxHull boxHull = s_boxHull;
+
+	b3Vec3 h = b3ClampBoxHalfExtent( halfExtent );
+
+	boxHull.base.aabb.lowerBound = b3Sub( center, h );
+	boxHull.base.aabb.upperBound = b3Add( center, h );
+	boxHull.base.surfaceArea = 8.0f * ( h.x * h.y + h.x * h.z + h.y * h.z );
+	boxHull.base.volume = 8.0f * h.x * h.y * h.z;
+	boxHull.base.innerRadius = b3MinFloat( h.x, b3MinFloat( h.y, h.z ) );
+	boxHull.base.center = center;
+
+	// The identity rotation leaves the box inertia diagonal.
+	boxHull.base.centralInertia = b3BoxInertia( boxHull.base.volume, b3Neg( h ), h );
+
+	// Matches b3MakeTransformedBoxHull bit for bit; the hash is left zero because
+	// transient consumers never read it. The mixed signed zeros on the negative
+	// face normals are what falls out of the general builder's identity-rotation
+	// pass, so they are reproduced here rather than cleaned up.
+	boxHull.boxPlanes[0] = (b3Plane){ { -1.0f, -0.0f, 0.0f }, h.x - center.x };
+	boxHull.boxPlanes[1] = (b3Plane){ { 1.0f, 0.0f, 0.0f }, h.x + center.x };
+	boxHull.boxPlanes[2] = (b3Plane){ { 0.0f, -1.0f, -0.0f }, h.y - center.y };
+	boxHull.boxPlanes[3] = (b3Plane){ { 0.0f, 1.0f, 0.0f }, h.y + center.y };
+	boxHull.boxPlanes[4] = (b3Plane){ { -0.0f, 0.0f, -1.0f }, h.z - center.z };
+	boxHull.boxPlanes[5] = (b3Plane){ { 0.0f, 0.0f, 1.0f }, h.z + center.z };
+
+	boxHull.boxPoints[0] = (b3Vec3){ center.x + h.x, center.y + h.y, center.z + h.z };
+	boxHull.boxPoints[1] = (b3Vec3){ center.x - h.x, center.y + h.y, center.z + h.z };
+	boxHull.boxPoints[2] = (b3Vec3){ center.x - h.x, center.y - h.y, center.z + h.z };
+	boxHull.boxPoints[3] = (b3Vec3){ center.x + h.x, center.y - h.y, center.z + h.z };
+	boxHull.boxPoints[4] = (b3Vec3){ center.x + h.x, center.y + h.y, center.z - h.z };
+	boxHull.boxPoints[5] = (b3Vec3){ center.x - h.x, center.y + h.y, center.z - h.z };
+	boxHull.boxPoints[6] = (b3Vec3){ center.x - h.x, center.y - h.y, center.z - h.z };
+	boxHull.boxPoints[7] = (b3Vec3){ center.x + h.x, center.y - h.y, center.z - h.z };
+
+	for ( int i = 0; i < 8; ++i )
+	{
+		boxHull.vx[i] = boxHull.boxPoints[i].x;
+		boxHull.vy[i] = boxHull.boxPoints[i].y;
+		boxHull.vz[i] = boxHull.boxPoints[i].z;
+	}
+
+	for ( int i = 0; i < 6; ++i )
+	{
+		boxHull.nx[i] = boxHull.boxPlanes[i].normal.x;
+		boxHull.ny[i] = boxHull.boxPlanes[i].normal.y;
+		boxHull.nz[i] = boxHull.boxPlanes[i].normal.z;
+	}
+
+	return boxHull;
 }
 
 b3BoxHull b3MakeBoxHull( float hx, float hy, float hz )

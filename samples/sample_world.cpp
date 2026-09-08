@@ -9,11 +9,8 @@
 
 #include "box3d/box3d.h"
 
-// Builds an identical box stack a long way from the origin to show off double precision world
-// positions. With double precision on, a stack at 1e7 settles exactly like one at the origin and
-// renders crisply because the debug draw origin tracks the content. A float build of the same
-// sample keeps full speed but loses sub-meter resolution far out, so the stack snaps to a coarse
-// grid and jitters. The settled height readout stays put at any offset in double, and drifts in float.
+// A stack at 1e7 settles like one at the origin. The debug draw origin tracks the content
+// so rendering retains local detail.
 class FarStack : public Sample
 {
 public:
@@ -22,9 +19,7 @@ public:
 	explicit FarStack( SampleContext* context )
 		: Sample( context )
 	{
-		// Double precision opens at the dramatic offset, float opens at the origin so it is usable
-		// out of the box. Either way the slider sweeps the full range.
-		m_offsetKilometers = b3IsDoublePrecision() ? m_maxOffset : 0.0f;
+		m_offsetKilometers = m_maxOffset;
 		m_columnCount = 6;
 
 		if ( context->restart == false )
@@ -63,7 +58,7 @@ public:
 		m_topBodyId = b3_nullBodyId;
 		for ( int i = 0; i < m_columnCount; ++i )
 		{
-			// A small alternating skew so a float build visibly drifts rather than balancing by luck.
+			// A small alternating skew keeps the stack from balancing symmetrically.
 			float skew = 0.02f * ( i & 1 ? 1.0f : -1.0f );
 			boxDef.position = b3OffsetPos( base, { skew, 0.5f + 1.0f * i, 0.0f } );
 			b3BodyId body = b3CreateBody( m_worldId, &boxDef );
@@ -99,11 +94,9 @@ public:
 	{
 		Sample::Step();
 
-		// Height of the top box above the ground, measured in the offset's own frame. This holds
-		// steady at any offset under double precision and drifts once float runs out of resolution.
+		// Height of the top box above the ground, measured relative to the world offset.
 		b3Vec3 top = b3SubPos( b3Body_GetWorldCenter( m_topBodyId ), m_base );
 
-		DrawTextLine( "double precision: %s", b3IsDoublePrecision() ? "ON" : "OFF" );
 		DrawTextLine( "world offset: %.1f km", m_offsetKilometers );
 		DrawTextLine( "top box height above ground: %.4f m", top.y );
 	}
@@ -169,7 +162,6 @@ public:
 	{
 		Sample::Step();
 
-		DrawTextLine( "double precision: %s", b3IsDoublePrecision() ? "ON" : "OFF" );
 		DrawTextLine( "pyramid built %.0f km from the world origin", m_offsetKilometers );
 	}
 
@@ -229,7 +221,6 @@ public:
 	{
 		Sample::Step();
 
-		DrawTextLine( "double precision: %s", b3IsDoublePrecision() ? "ON" : "OFF" );
 		DrawTextLine( "%d ragdolls piled %.0f km from the world origin", m_count, m_offsetKilometers );
 	}
 
@@ -288,7 +279,6 @@ public:
 			}
 		}
 
-		DrawTextLine( "double precision: %s", b3IsDoublePrecision() ? "ON" : "OFF" );
 		DrawTextLine( "mesh drop running %.0f km from the world origin", m_offsetKilometers );
 		if ( m_failed )
 		{

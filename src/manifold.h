@@ -47,6 +47,26 @@ int b3ClipPolygon( b3ClipVertex* out, b3ClipVertex* polygon, int count, b3Plane 
 
 b3AxisQuery b3ComputeSeparatingAxis( const b3HullData* hullA, const b3HullData* hullB, b3Transform xfB, bool earlyReturn );
 
+// Internals for callers that need exhaustive SAT before selecting one hull manifold
+bool b3EvaluateHullFeature( b3SeparatingAxis* result, const b3HullData* hullA, const b3HullData* hullB, b3Transform transformBtoA,
+							const b3SATCache* feature );
+
+bool b3BuildHullManifoldForAxis( b3LocalManifold* manifold, int capacity, const b3HullData* hullA, const b3HullData* hullB,
+								 b3Transform transformBtoA, b3SeparatingAxis axis, b3SATCache* result );
+
+bool b3BuildHullManifoldForAxisWithFootprint( b3LocalManifold* manifold, int capacity, b3LocalManifold* footprint,
+											  int footprintCapacity, const b3HullData* hullA, const b3HullData* hullB,
+											  b3Transform transformBtoA, b3SeparatingAxis axis, b3SATCache* result,
+											  float speculativeDistance );
+
+bool b3BuildHullManifoldFromQuery( b3LocalManifold* manifold, int capacity, const b3HullData* hullA, const b3HullData* hullB,
+								   b3Transform transformBtoA, const b3AxisQuery* query, b3SATCache* result );
+
+bool b3BuildHullManifoldFromQueryWithFootprint( b3LocalManifold* manifold, int capacity, b3LocalManifold* footprint,
+												int footprintCapacity, const b3HullData* hullA, const b3HullData* hullB,
+												b3Transform transformBtoA, const b3AxisQuery* query, b3SATCache* result,
+												float speculativeDistance );
+
 #if B3_ENABLE_VALIDATION
 bool b3ValidatePolygon( b3ClipVertex* polygon, int count );
 #endif

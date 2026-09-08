@@ -20,14 +20,8 @@ B3_API void b3SetStallThreshold( float seconds );
 /// Get the threshold for logging stalls.
 B3_API float b3GetStallThreshold( void );
 
-// Used to detect bad values. In float mode positions greater than about 16km have precision
-// problems, so 100km is a safe limit. Large world mode keeps coordinates accurate much farther
-// from the origin, so the sanity limit widens to keep valid far-field positions from tripping it.
-#if defined( BOX3D_DOUBLE_PRECISION )
+// World coordinate limit used to detect invalid values.
 #define B3_HUGE ( 1.0e9f * b3GetLengthUnitsPerMeter() )
-#else
-#define B3_HUGE ( 1.0e5f * b3GetLengthUnitsPerMeter() )
-#endif
 
 /// Maximum parallel workers. Used for some fixed size arrays.
 #define B3_MAX_WORKERS 32
@@ -136,4 +130,11 @@ B3_API float b3GetStallThreshold( void );
 /// slow down the simulation. Must be 1 or more.
 #ifndef B3_RESTITUTION_ITERATIONS
 #define B3_RESTITUTION_ITERATIONS 1
+#endif
+
+/// This is the limit on how many mesh or heightfield triangles a single convex shape can collide with.
+/// Increasing this will increase stack usage, so be careful. I recommend to simplify your collision data
+/// before increasing this. For example, using render mesh for collision often leads to poor performance.
+#ifndef B3_MAX_MESH_CONTACT_TRIANGLES
+#define B3_MAX_MESH_CONTACT_TRIANGLES 256
 #endif

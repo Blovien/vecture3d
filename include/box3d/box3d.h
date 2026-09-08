@@ -22,12 +22,8 @@
  * @{
  */
 
-#if defined( BOX3D_DOUBLE_PRECISION )
-// Force a link error if the application and library disagree on precision. A float app linking
-// a double precision library, or the reverse, gets one unresolved external on the first call
-// every program makes. CMake consumers inherit the define and cannot mismatch.
+// Preserve the existing double precision symbol and reject linkage to older float libraries.
 #define b3CreateWorld b3CreateWorldDoublePrecision
-#endif
 
 /// Create a world for rigid body simulation. A world contains bodies, shapes, and constraints. You may create
 /// up to 128 worlds. Each world is completely independent and may be simulated in parallel.
@@ -71,6 +67,11 @@ B3_API b3ContactEvents b3World_GetContactEvents( b3WorldId worldId );
 /// Get the joint events for the current time step. The event data is transient. Do not store a reference to this data.
 B3_API b3JointEvents b3World_GetJointEvents( b3WorldId worldId );
 
+/// The world queries below share one BlockGrid query buffer that the world owns and sizes
+/// when a BlockGrid shape is attached or replaced. A query therefore allocates nothing, and,
+/// like every other world operation, one runs at a time: they are not safe to call
+/// concurrently with each other or with b3World_Step.
+
 /// Overlap test for all shapes that *potentially* overlap the provided AABB
 B3_API b3TreeStats b3World_OverlapAABB( b3WorldId worldId, b3AABB aabb, b3QueryFilter filter, b3OverlapResultFcn* fcn,
 										void* context );
@@ -82,6 +83,7 @@ B3_API b3TreeStats b3World_OverlapShape( b3WorldId worldId, b3Pos origin, const 
 
 /// Cast a ray into the world to collect shapes in the path of the ray.
 /// Your callback function controls whether you get the closest point, any point, or n-points.
+/// Ignores back-side collision on meshes and height-fields.
 /// @note The callback function may receive shapes in any order
 /// @param worldId The world to cast the ray against
 /// @param origin The start point of the ray
@@ -94,19 +96,20 @@ B3_API b3TreeStats b3World_CastRay( b3WorldId worldId, b3Pos origin, b3Vec3 tran
 									b3CastResultFcn* fcn, void* context );
 
 /// Cast a ray into the world to collect the closest hit. This is a convenience function. Ignores initial overlap.
-/// This is less general than b3World_CastRay() and does not allow for custom filtering.
+/// This is less general than b3World_CastRay() and does not allow for custom filtering. Ignores back-side collision
+/// on meshes and height-fields.
 B3_API b3RayResult b3World_CastRayClosest( b3WorldId worldId, b3Pos origin, b3Vec3 translation, b3QueryFilter filter );
 
 /// Cast a shape through the world. Similar to a cast ray except that a shape is cast instead of a point.
 /// The proxy points are relative to the origin and the hit points come back as world positions, so the
-/// cast stays precise far from the world origin.
+/// cast stays precise far from the world origin. Ignores back-side collision on meshes and height-fields.
 ///	@see b3World_CastRay
 B3_API b3TreeStats b3World_CastShape( b3WorldId worldId, b3Pos origin, const b3ShapeProxy* proxy, b3Vec3 translation,
 									  b3QueryFilter filter, b3CastResultFcn* fcn, void* context );
 
 /// Cast a capsule mover through the world. This is a special shape cast that handles sliding along other shapes while reducing
 /// clipping. This is not a good source of information about what the mover is touching. Instead use the planes returned by
-/// b3World_CollideMover.
+/// b3World_CollideMover. Ignores back-side collision on meshes and height-fields.
 /// @param worldId World to cast the mover against
 /// @param origin World position the mover capsule is relative to
 /// @param mover Capsule mover, relative to the origin
@@ -120,6 +123,7 @@ B3_API float b3World_CastMover( b3WorldId worldId, b3Pos origin, const b3Capsule
 
 /// Collide a capsule mover with the world, gathering collision planes that can be fed to b3SolvePlanes. Useful for
 /// kinematic character movement. The mover and the returned planes are relative to the origin.
+/// Ignores back-side collision on meshes and height-fields.
 B3_API void b3World_CollideMover( b3WorldId worldId, b3Pos origin, const b3Capsule* mover, b3QueryFilter filter,
 								  b3PlaneResultFcn* fcn, void* context );
 
@@ -190,11 +194,30 @@ B3_API void b3World_SetContactRecycleDistance( b3WorldId worldId, float recycleD
 /// Get the contact point recycling distance. Usually in meters.
 B3_API float b3World_GetContactRecycleDistance( b3WorldId worldId );
 
-/// Set the maximum linear speed. Usually in m/s.
+/// Set the maximum linear speed. Usually in m/s. Applies from the next step.
+/// @warning A speed limit alone does not guarantee collision safety. BlockGrid speculative admission
+/// predicts free motion over the current step. Later contact or joint impulses can change that motion,
+/// and rotational paths are not certified. Test the chosen speeds and timestep against the game's geometry.
 B3_API void b3World_SetMaximumLinearSpeed( b3WorldId worldId, float maximumLinearSpeed );
 
 /// Get the maximum linear speed. Usually in m/s.
 B3_API float b3World_GetMaximumLinearSpeed( b3WorldId worldId );
+
+/// Set the maximum angular speed in radians per second. Zero restores the Box3D default, which is the
+/// per-step rotation clamp and therefore scales with the step length. Applies from the next step.
+/// @warning As with b3World_SetMaximumLinearSpeed, test the chosen limit and timestep against thin
+/// geometry. Neither the rotation clamp nor speculative admission certifies the full rotational path.
+B3_API void b3World_SetMaximumAngularSpeed( b3WorldId worldId, float maximumAngularSpeed );
+
+/// Get the maximum angular speed in radians per second. Zero means the Box3D per-step default.
+B3_API float b3World_GetMaximumAngularSpeed( b3WorldId worldId );
+
+/// Set the maximum number of Projectile sweep candidates a single sweep may consider. Zero, the
+/// default, means unlimited. Applies from the next step.
+B3_API void b3World_SetProjectileCandidateCap( b3WorldId worldId, int projectileCandidateCap );
+
+/// Get the Projectile sweep candidate cap. Zero means unlimited.
+B3_API int b3World_GetProjectileCandidateCap( b3WorldId worldId );
 
 /// Enable/disable constraint warm starting. Advanced feature for testing. Disabling
 /// warm starting greatly reduces stability and provides no performance gain.
@@ -211,6 +234,11 @@ B3_API b3Profile b3World_GetProfile( b3WorldId worldId );
 
 /// Get world counters and sizes
 B3_API b3Counters b3World_GetCounters( b3WorldId worldId );
+
+/// Get BlockGrid Pair State memory and pair processing counters.
+/// Step counters describe the latest completed step. Persistent bytes are read from the current live Pair State total.
+/// An invalid world returns zero initialized counters.
+B3_API v3BlockGridPairCounters v3World_GetBlockGridPairCounters( b3WorldId worldId );
 
 /// Get max capacity. This can be used with b3WorldDef to avoid run-time allocations and copies
 B3_API b3Capacity b3World_GetMaxCapacity( b3WorldId worldId );
@@ -688,6 +716,15 @@ B3_API void b3Body_SetSleepThreshold( b3BodyId bodyId, float sleepThreshold );
 /// Get the sleep threshold, usually in meters per second.
 B3_API float b3Body_GetSleepThreshold( b3BodyId bodyId );
 
+/// Set the continuous collision safety factor. Smaller values engage continuous collision sooner
+/// but may increase work and visible motion hitches. Zero classifies any body with non-zero measured
+/// motion as fast. Values above 0.5 delay continuous collision and reduce protection.
+/// Recommended range [0.01, 0.5]. Non-dimensional.
+B3_API void b3Body_SetSafetyFactor( b3BodyId bodyId, float safetyFactor );
+
+/// Get the continuous collision safety factor. Non-dimensional.
+B3_API float b3Body_GetSafetyFactor( b3BodyId bodyId );
+
 /// Returns true if this body is enabled
 B3_API bool b3Body_IsEnabled( b3BodyId bodyId );
 
@@ -759,14 +796,25 @@ B3_API int b3Body_GetContactData( b3BodyId bodyId, b3ContactData* contactData, i
 /// If there are no shapes attached then the returned AABB is empty and centered on the body origin.
 B3_API b3AABB b3Body_ComputeAABB( b3BodyId bodyId );
 
+/// The minimum distance from any shape to the shape centroid.
+B3_API float b3Body_GetMinExtent( b3BodyId bodyId );
+
+/// The maximum extent vector from any point on the body shapes to the center of mass.
+B3_API b3Vec3 b3Body_GetMaxExtent( b3BodyId bodyId );
+
+/// The maximum extent vector from any point on the body shapes to the body origin. Conservative.
+B3_API b3Vec3 b3Body_GetMaxExtentOrigin( b3BodyId bodyId );
+
 /// Get the closest point on a body to a world target.
 B3_API float b3Body_GetClosestPoint( b3BodyId bodyId, b3Vec3* result, b3Vec3 target );
 
 /// Cast a ray at a specific body using a specified body transform.
+/// Ignores back-side collision on meshes and height-fields.
 B3_API b3BodyCastResult b3Body_CastRay( b3BodyId bodyId, b3Pos origin, b3Vec3 translation, b3QueryFilter filter,
 										float maxFraction, b3WorldTransform bodyTransform );
 
 /// Cast a shape at a specific body using a specified body transform.
+/// Ignores back-side collision on meshes and height-fields.
 B3_API b3BodyCastResult b3Body_CastShape( b3BodyId bodyId, b3Pos origin, const b3ShapeProxy* proxy, b3Vec3 translation,
 										  b3QueryFilter filter, float maxFraction, bool canEncroach,
 										  b3WorldTransform bodyTransform );
@@ -776,8 +824,17 @@ B3_API bool b3Body_OverlapShape( b3BodyId bodyId, b3Pos origin, const b3ShapePro
 								 b3WorldTransform bodyTransform );
 
 /// Collide a character mover with a specific body using a specified body transform.
+/// Only considers convex shapes on the body.
 B3_API int b3Body_CollideMover( b3BodyId bodyId, b3BodyPlaneResult* bodyPlanes, int planeCapacity, b3Pos origin,
 								const b3Capsule* mover, b3QueryFilter filter, b3WorldTransform bodyTransform );
+
+/// Perform a time of impact between a character mover and a body using specified sweep transforms.
+/// Initial overlap of any shape on the body is ignored. A non-overlapped shape can still be hit.
+/// A miss returns a null shape identifier and a fraction of 1.
+/// Only considers convex shapes on the body.
+B3_API b3BodyTOIResult b3Body_TimeOfImpactMover( b3BodyId bodyId, b3Pos origin, const b3Capsule* mover, b3Vec3 moverTranslation,
+												 b3QueryFilter filter, b3WorldTransform bodyTransform1,
+												 b3WorldTransform bodyTransform2 );
 
 /** @} */ // body
 
@@ -786,7 +843,7 @@ B3_API int b3Body_CollideMover( b3BodyId bodyId, b3BodyPlaneResult* bodyPlanes, 
  * Functions to create, destroy, and access.
  * Shapes bind raw geometry to bodies and hold material properties including friction and restitution.
  * You may add multiple shapes to a single body. There are no hard limits on shape count per body.
- * 
+ *
  * When you create a shape on a body the center of mass moves. This can lead to the body linear velocity
  * changing if the angular velocity is non-zero.
  * @{
@@ -832,11 +889,6 @@ B3_API b3ShapeId b3CreateHeightFieldShape( b3BodyId bodyId, const b3ShapeDef* de
 /// Note: runtime compounds are achieved by adding multiple shapes to a body.
 /// Runtime compounds can be dynamic and/or kinematic.
 B3_API b3ShapeId b3CreateBakedCompoundShape( b3BodyId bodyId, b3ShapeDef* def, const b3CompoundData* compound );
-
-/// Create an immutable voxel shape from convex compound children.
-/// Voxel shapes are only allowed on static bodies and cannot be sensors.
-/// The voxel data is borrowed and must remain valid until the shape is destroyed.
-B3_API b3ShapeId b3CreateVoxelShape( b3BodyId bodyId, const b3ShapeDef* def, const b3CompoundData* voxel );
 
 /// Destroy a shape. You may defer the body mass update which can improve performance if several shapes on a
 ///	body are destroyed at once.
@@ -1080,6 +1132,9 @@ B3_API void* b3Joint_GetUserData( b3JointId jointId );
 
 /// Wake the bodies connect to this joint
 B3_API void b3Joint_WakeBodies( b3JointId jointId );
+
+/// Is the joint awake? If true then an attached body is awake.
+B3_API bool b3Joint_IsAwake( b3JointId jointId );
 
 /// Get the current constraint force for this joint
 B3_API b3Vec3 b3Joint_GetConstraintForce( b3JointId jointId );
@@ -1557,7 +1612,9 @@ B3_API void b3SphericalJoint_EnableMotor( b3JointId jointId, bool enableMotor );
 /// Is the spherical joint motor enabled?
 B3_API bool b3SphericalJoint_IsMotorEnabled( b3JointId jointId );
 
-/// Set the spherical joint motor velocity in radians per second
+/// Set the spherical joint motor velocity in radians per second. This is the relative angular
+/// velocity between the two bodies in world space.
+/// motorVelocity = angularVelocityB - angularVelocityA
 B3_API void b3SphericalJoint_SetMotorVelocity( b3JointId jointId, b3Vec3 motorVelocity );
 
 /// Get the spherical joint motor velocity in radians per second

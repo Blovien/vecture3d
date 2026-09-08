@@ -1,4 +1,7 @@
 build/
+build/v3-release/
+build-*/
+
 .gradle/
 imgui.ini
 settings.ini
@@ -14,5 +17,8 @@ CMakeUserPresets.json
 .fetchcontent-cache/
 *.b3rec
 Superluminal/
-build-dp/
-build/v3-release/
+
+# Generated project reports and screenshots
+/docs/research/
+/docs/testing/alpha-ci.md
+/docs/blockgrid-playground.md

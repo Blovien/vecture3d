@@ -24,6 +24,45 @@ class V3DeterminismTest {
         assertEquals(0.5, first.get(1).positionX() - first.get(0).positionX(), 0.0);
     }
 
+    @Test
+    void identicalCookedBlockGridsGiveIdenticalTransformsInTwoWorlds() {
+        List<V3Transform> first = simulateBlockGridScene();
+        List<V3Transform> second = simulateBlockGridScene();
+
+        assertEquals(first, second);
+        assertEquals(1, first.size());
+        assertEquals(0.0, first.get(0).positionY(), 0.05);
+    }
+
+    private static List<V3Transform> simulateBlockGridScene() {
+        V3NativeLibrary library = V3TestSupport.library();
+        try (V3World world = library.createWorld(0.0, -9.81, 0.0);
+             V3CookedGrid terrain = V3TestSupport.flatTerrainSection().cook(library);
+             V3CookedGrid hull = V3TestSupport.hollowHull(false).cook(library)) {
+            world.attachBlockGrid(
+                V3BodyDefinition.at(new V3BodyHandle(4_001L, 1), V3BoxBodyCommand.Kind.STATIC, 0.0, -1.0, 0.0, 0),
+                terrain
+            );
+            world.attachBlockGrid(
+                V3BodyDefinition.at(
+                    new V3BodyHandle(4_002L, 1),
+                    V3BoxBodyCommand.Kind.DYNAMIC,
+                    -2.75,
+                    3.0,
+                    -3.25,
+                    V3BoxBodyCommand.INITIAL_AWAKE_FLAG
+                ),
+                hull
+            );
+
+            V3StepResult result = null;
+            for (int frame = 0; frame < 60; frame++) {
+                result = world.step(4, List.of(), List.of(), List.of());
+            }
+            return result.transforms();
+        }
+    }
+
     private static List<V3Transform> simulateFarScene() {
         try (V3World world = V3TestSupport.library().createWorld(0.0, -9.81, 0.0)) {
             V3BoxBodyCommand floor = V3TestSupport.box(
@@ -50,7 +89,7 @@ class V3DeterminismTest {
                 5.0,
                 2.0
             );
-            world.replaceBoxBodies(List.of(), List.of(floor, first, second));
+            V3TestSupport.attachCenteredUnitGrids(world, List.of(floor, first, second));
 
             V3StepResult result = null;
             for (int frame = 0; frame < 30; frame++) {
