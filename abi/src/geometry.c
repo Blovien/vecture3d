@@ -19,19 +19,6 @@ uint32_t v3_geometry_saturating_add_internal( uint32_t value, uint32_t increment
 	return value >= maximum || maximum - value < increment ? maximum : value + increment;
 }
 
-int v3_geometry_find_body_entry_internal( const v3_world* world, uint64_t logical_id )
-{
-	for ( uint32_t index = 0; index < world->body_entry_count; ++index )
-	{
-		if ( world->body_entries[index].logical_id == logical_id )
-		{
-			return (int)index;
-		}
-	}
-
-	return -1;
-}
-
 bool v3_geometry_is_normalized_quaternion_internal( float x, float y, float z, float w )
 {
 	if ( !isfinite( x ) || !isfinite( y ) || !isfinite( z ) || !isfinite( w ) )
@@ -114,52 +101,8 @@ static v3_status v3_geometry_validate_single_creation( const v3_world* world, co
 		return status;
 	}
 
-	int entry_index = v3_geometry_find_body_entry_internal( world, command->logical_id );
-	if ( entry_index < 0 )
-	{
-		if ( command->generation != 1 )
-		{
-			return V3_INVALID_GENERATION;
-		}
-		*new_entry_count = 1;
-		return V3_OK;
-	}
-
-	*new_entry_count = 0;
-	const v3_body_entry* entry = world->body_entries + entry_index;
-	if ( entry->is_active )
-	{
-		return V3_DUPLICATE_ID;
-	}
-	if ( entry->generation == INT32_MAX )
-	{
-		return V3_GENERATION_EXHAUSTED;
-	}
-	return command->generation == entry->generation + 1u ? V3_OK : V3_INVALID_GENERATION;
-}
-
-v3_status v3_geometry_reserve_body_entries_internal( v3_world* world, uint32_t required_capacity )
-{
-	if ( required_capacity <= world->body_entry_capacity )
-	{
-		return V3_OK;
-	}
-
-	uint32_t new_capacity = world->body_entry_capacity == 0 ? UINT32_C( 16 ) : world->body_entry_capacity;
-	while ( new_capacity < required_capacity )
-	{
-		new_capacity = new_capacity > V3_MAX_LOGICAL_BODY_IDS / 2u ? V3_MAX_LOGICAL_BODY_IDS : new_capacity * 2u;
-	}
-
-	v3_body_entry* entries = realloc( world->body_entries, (size_t)new_capacity * sizeof( *entries ) );
-	if ( entries == NULL )
-	{
-		return V3_OUT_OF_MEMORY;
-	}
-
-	world->body_entries = entries;
-	world->body_entry_capacity = new_capacity;
-	return V3_OK;
+	return v3_geometry_validate_body_generation_internal( world, command->logical_id, command->generation, false,
+														  new_entry_count );
 }
 
 static b3BodyDef v3_geometry_make_body_definition( const v3_box_body_command* command )
@@ -248,14 +191,7 @@ static v3_box_body_command v3_geometry_make_sphere_command( const v3_body_defini
 
 static void v3_geometry_publish_body( v3_world* world, const v3_body_entry* created )
 {
-	int entry_index = v3_geometry_find_body_entry_internal( world, created->logical_id );
-	if ( entry_index < 0 )
-	{
-		entry_index = (int)world->body_entry_count++;
-	}
-
-	world->body_entries[entry_index] = *created;
-	world->body_entries[entry_index].is_active = true;
+	v3_geometry_publish_body_internal( world, created );
 	world->active_body_count += 1u;
 	world->mutation_batch_count = v3_geometry_saturating_add_internal( world->mutation_batch_count, 1 );
 	world->created_body_count = v3_geometry_saturating_add_internal( world->created_body_count, 1 );
@@ -270,8 +206,7 @@ v3_status v3_world_create_hull_body_internal( v3_world* world, const v3_box_body
 	{
 		return status;
 	}
-	if ( world->active_body_count >= V3_MAX_BODIES_PER_BATCH ||
-		 world->body_entry_count + new_entry_count > V3_MAX_LOGICAL_BODY_IDS )
+	if ( world->active_body_count >= V3_MAX_BODIES_PER_BATCH )
 	{
 		return V3_LIMIT_EXCEEDED;
 	}
@@ -295,7 +230,7 @@ v3_status v3_world_create_hull_body_internal( v3_world* world, const v3_box_body
 		return V3_INVALID_DIMENSION;
 	}
 
-	status = v3_geometry_reserve_body_entries_internal( world, world->body_entry_count + new_entry_count );
+	status = v3_geometry_reserve_body_state_internal( world, world->active_body_count + 1u, new_entry_count );
 	if ( status != V3_OK )
 	{
 		b3DestroyHull( hull );
@@ -345,13 +280,12 @@ v3_status v3_world_create_sphere_body_internal( v3_world* world, const v3_body_d
 	{
 		return status;
 	}
-	if ( world->active_body_count >= V3_MAX_BODIES_PER_BATCH ||
-		 world->body_entry_count + new_entry_count > V3_MAX_LOGICAL_BODY_IDS )
+	if ( world->active_body_count >= V3_MAX_BODIES_PER_BATCH )
 	{
 		return V3_LIMIT_EXCEEDED;
 	}
 
-	status = v3_geometry_reserve_body_entries_internal( world, world->body_entry_count + new_entry_count );
+	status = v3_geometry_reserve_body_state_internal( world, world->active_body_count + 1u, new_entry_count );
 	if ( status != V3_OK )
 	{
 		return status;

@@ -336,28 +336,8 @@ static v3_status v3_block_grid_validate_mass( const v3_mass_properties* mass )
 static v3_status v3_block_grid_validate_identity( const v3_world* world, const v3_body_definition* body,
 												  uint32_t* new_entry_count )
 {
-	int entry_index = v3_geometry_find_body_entry_internal( world, body->handle.logical_id );
-	if ( entry_index < 0 )
-	{
-		if ( body->handle.generation != 1 )
-		{
-			return V3_INVALID_GENERATION;
-		}
-		*new_entry_count = 1;
-		return V3_OK;
-	}
-
-	*new_entry_count = 0;
-	const v3_body_entry* entry = world->body_entries + entry_index;
-	if ( entry->is_active )
-	{
-		return V3_DUPLICATE_ID;
-	}
-	if ( entry->generation == INT32_MAX )
-	{
-		return V3_GENERATION_EXHAUSTED;
-	}
-	return body->handle.generation == entry->generation + 1u ? V3_OK : V3_INVALID_GENERATION;
+	return v3_geometry_validate_body_generation_internal( world, body->handle.logical_id, body->handle.generation, false,
+														  new_entry_count );
 }
 
 v3_status v3_world_attach_block_grid_internal( v3_world* world, const v3_body_definition* body, v3_cooked_grid* grid,
@@ -388,13 +368,12 @@ v3_status v3_world_attach_block_grid_internal( v3_world* world, const v3_body_de
 	{
 		return status;
 	}
-	if ( world->active_body_count >= V3_MAX_BODIES_PER_BATCH ||
-		 world->body_entry_count + new_entry_count > V3_MAX_LOGICAL_BODY_IDS )
+	if ( world->active_body_count >= V3_MAX_BODIES_PER_BATCH )
 	{
 		return V3_LIMIT_EXCEEDED;
 	}
 
-	status = v3_geometry_reserve_body_entries_internal( world, world->body_entry_count + new_entry_count );
+	status = v3_geometry_reserve_body_state_internal( world, world->active_body_count + 1u, new_entry_count );
 	if ( status != V3_OK )
 	{
 		return status;
@@ -453,12 +432,7 @@ v3_status v3_world_attach_block_grid_internal( v3_world* world, const v3_body_de
 		b3Body_SetMassData( body_id, mass_data );
 	}
 
-	int entry_index = v3_geometry_find_body_entry_internal( world, body->handle.logical_id );
-	if ( entry_index < 0 )
-	{
-		entry_index = (int)world->body_entry_count++;
-	}
-	world->body_entries[entry_index] = (v3_body_entry){
+	v3_body_entry created = {
 		.logical_id = body->handle.logical_id,
 		.generation = body->handle.generation,
 		.body_id = body_id,
@@ -469,6 +443,7 @@ v3_status v3_world_attach_block_grid_internal( v3_world* world, const v3_body_de
 		.is_active = true,
 	};
 
+	v3_geometry_publish_body_internal( world, &created );
 	world->active_body_count += 1u;
 	world->mutation_batch_count = v3_geometry_saturating_add_internal( world->mutation_batch_count, 1 );
 	world->created_body_count = v3_geometry_saturating_add_internal( world->created_body_count, 1 );

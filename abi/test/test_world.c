@@ -281,7 +281,29 @@ static int test_generations_and_stale_removals( void )
 	return 0;
 }
 
-static int test_exact_body_and_logical_entry_limits( void )
+static int test_distinct_id_churn( void )
+{
+	v3_world* world = v3_world_create( 0.0, 0.0, 0.0, NULL );
+	ENSURE( world != NULL );
+	for ( uint64_t id = 1; id <= 3u * V3_TEST_BODY_LIMIT; ++id )
+	{
+		v3_box_body_command body = make_static_box( id, 1 );
+		ENSURE( v3_world_replace_box_bodies( world, NULL, 0, &body, 1 ) == V3_OK );
+		v3_body_handle removal = make_handle( id, 1 );
+		ENSURE( v3_world_replace_box_bodies( world, &removal, 1, NULL, 0 ) == V3_OK );
+	}
+	// Recycling simulation storage must not allow an old logical generation to return.
+	v3_box_body_command reused = make_static_box( 1, 1 );
+	ENSURE( v3_world_replace_box_bodies( world, NULL, 0, &reused, 1 ) == V3_INVALID_GENERATION );
+	reused.generation = 2;
+	ENSURE( v3_world_replace_box_bodies( world, NULL, 0, &reused, 1 ) == V3_OK );
+	v3_body_handle stale = make_handle( 1, 1 );
+	ENSURE( v3_world_replace_box_bodies( world, &stale, 1, NULL, 0 ) == V3_STALE_HANDLE );
+	v3_world_destroy( world );
+	return 0;
+}
+
+static int test_resident_body_limit_does_not_limit_lifetime_ids( void )
 {
 	v3_world* world = v3_world_create( 0.0, -9.81, 0.0, NULL );
 	ENSURE( world != NULL );
@@ -299,10 +321,11 @@ static int test_exact_body_and_logical_entry_limits( void )
 	}
 
 	ENSURE( v3_world_replace_box_bodies( world, NULL, 0, creations, V3_TEST_BODY_LIMIT ) == V3_OK );
-	ENSURE( v3_world_replace_box_bodies( world, removals, V3_TEST_BODY_LIMIT, NULL, 0 ) == V3_OK );
-
 	v3_box_body_command new_id = make_static_box( UINT64_C( 20000 ), UINT32_C( 1 ) );
 	ENSURE( v3_world_replace_box_bodies( world, NULL, 0, &new_id, 1 ) == V3_LIMIT_EXCEEDED );
+	ENSURE( v3_world_replace_box_bodies( world, removals, V3_TEST_BODY_LIMIT, NULL, 0 ) == V3_OK );
+
+	ENSURE( v3_world_replace_box_bodies( world, NULL, 0, &new_id, 1 ) == V3_OK );
 
 	free( removals );
 	free( creations );
@@ -357,6 +380,7 @@ static int test_replacement_churn( void )
 int main( void )
 {
 	uint32_t baseline = v3_active_world_count();
+	ENSURE( test_distinct_id_churn() == 0 );
 	ENSURE( test_world_sleep_limits_are_consistent_and_atomic() == 0 );
 	ENSURE( test_native_linear_speed_limit_bounds_motion() == 0 );
 	ENSURE( test_world_lifetime() == 0 );
@@ -364,7 +388,7 @@ int main( void )
 	ENSURE( test_atomic_validation() == 0 );
 	ENSURE( test_duplicate_ids() == 0 );
 	ENSURE( test_generations_and_stale_removals() == 0 );
-	ENSURE( test_exact_body_and_logical_entry_limits() == 0 );
+	ENSURE( test_resident_body_limit_does_not_limit_lifetime_ids() == 0 );
 	ENSURE( test_transient_peak_limit() == 0 );
 	ENSURE( test_replacement_churn() == 0 );
 	ENSURE( v3_active_world_count() == baseline );
