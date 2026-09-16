@@ -6,8 +6,45 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class V3DeterminismTest {
+    @Test
+    void contactPointsAndIdentitiesSurviveFarOriginTranslation() {
+        List<V3BlockContactEvent> near = contactAt(0.0);
+        assertFalse(near.isEmpty());
+        for (double origin : new double[] {10_000_000.0, -10_000_000.0, 20_000_000.0, -20_000_000.0}) {
+            List<V3BlockContactEvent> far = contactAt(origin);
+            assertEquals(near.size(), far.size(), "event count at " + origin);
+            for (int index = 0; index < near.size(); index++) {
+                V3BlockContactEvent expected = near.get(index);
+                V3BlockContactEvent actual = far.get(index);
+                assertEquals(expected.kind(), actual.kind());
+                assertEquals(expected.fixedStepIndex(), actual.fixedStepIndex());
+                assertEquals(expected.sideA(), actual.sideA());
+                assertEquals(expected.sideB(), actual.sideB());
+                assertEquals(expected.pointX(), actual.pointX() - origin, 1e-6, "local contact X at " + origin);
+                assertEquals(expected.pointY(), actual.pointY() - origin, 1e-6, "local contact Y at " + origin);
+                assertEquals(expected.pointZ(), actual.pointZ() - origin, 1e-6, "local contact Z at " + origin);
+            }
+        }
+    }
+
+    private static List<V3BlockContactEvent> contactAt(double origin) {
+        V3NativeLibrary library = V3TestSupport.library();
+        try (V3World world = library.createWorld(0.0, 0.0, 0.0);
+             V3CookedGrid grid = library.cookBlockGrid(
+                 List.of(V3TestSupport.BLOCK_MATERIAL),
+                 List.of(new V3BlockCell(0, 0, 0, 0, 42L)),
+                 List.of(V3BlockBox.fullCube(0, 0, 42L)))) {
+            world.attachBlockGrid(V3BodyDefinition.at(new V3BodyHandle(1L, 1),
+                V3BoxBodyCommand.Kind.STATIC, origin, origin, origin, 0), grid);
+            world.replaceBoxBodies(List.of(), List.of(V3TestSupport.box(2L, 1,
+                V3BoxBodyCommand.Kind.DYNAMIC, origin + 0.5, origin + 1.45, origin + 0.5)));
+            return world.step(1, List.of(), List.of(), List.of()).blockContactEvents();
+        }
+    }
+
     @AfterEach
     void deterministicWorldsReturnToTheNativeLifetimeBaseline() {
         assertEquals(0, V3TestSupport.library().activeWorldCount());

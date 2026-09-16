@@ -159,6 +159,61 @@ static v3_body_definition make_block_grid_body( uint64_t logical_id, uint32_t ki
 	};
 }
 
+static v3_status create_churn_body( v3_world* world, v3_cooked_grid* grid, uint64_t id, uint32_t generation, uint32_t path )
+{
+	v3_box_body_command box = make_static_box( id, 0.0, 0.0, 0.0 );
+	box.generation = generation;
+	v3_body_definition body = make_block_grid_body( id, V3_STATIC_BODY, 0.0, 0.0, 0.0 );
+	body.handle.generation = generation;
+	v3_body_handle handle;
+	float points[] = { -0.5f, -0.5f, -0.5f, 0.5f, -0.5f, -0.5f, -0.5f, 0.5f, -0.5f, -0.5f, -0.5f, 0.5f };
+	switch ( path % 4u )
+	{
+		case 0:
+			return v3_world_replace_box_bodies( world, NULL, 0, &box, 1 );
+		case 1:
+			return v3_world_create_sphere_body( world, &body, 0.5f, 0.0f, 0.5f, &handle );
+		case 2:
+			return v3_world_create_hull_body( world, &box, points, 4 );
+		default:
+			return v3_world_attach_block_grid( world, &body, grid, NULL, &handle );
+	}
+}
+
+static int test_all_creation_paths_share_recyclable_body_storage( void )
+{
+	v3_world* world = v3_world_create( 0.0, 0.0, 0.0, NULL );
+	ENSURE( world != NULL );
+	v3_block_cell cell = { .feature_id = 1 };
+	v3_block_box box = make_full_cube_box( 0, 1 );
+	v3_cooked_grid* grid = NULL;
+	ENSURE( v3_cook_block_grid( &v3_test_block_material, 1, &cell, 1, &box, 1, &grid ) == V3_OK );
+	for ( uint32_t generation = 1; generation <= 2; ++generation )
+	{
+		for ( uint32_t index = 0; index < 8192; ++index )
+		{
+			// Exercise all 64 bits and reuse each ID through a different geometry API in round two.
+			uint64_t id = UINT64_C( 0x8000000000000001 ) + ( (uint64_t)index << 32u );
+			if ( generation == 2 )
+			{
+				ENSURE( create_churn_body( world, grid, id, 1, index + generation ) == V3_INVALID_GENERATION );
+			}
+			ENSURE( create_churn_body( world, grid, id, generation, index + generation ) == V3_OK );
+			ENSURE( world->body_entry_count == 1 && world->active_body_count == 1 );
+			ENSURE( world->body_entry_capacity <= V3_MAX_BODIES_PER_BATCH );
+			v3_body_handle handle = { .logical_id = id, .generation = generation };
+			ENSURE( v3_world_replace_box_bodies( world, &handle, 1, NULL, 0 ) == V3_OK );
+			ENSURE( world->body_entry_count == 0 && world->active_body_count == 0 );
+		}
+		ENSURE( world->body_generation_count == 8192 );
+		// History retains one last-generation record per distinct ID, not per incarnation.
+		ENSURE( world->body_generation_capacity <= 4u * world->body_generation_count );
+	}
+	v3_destroy_cooked_grid( grid );
+	v3_world_destroy( world );
+	return 0;
+}
+
 static int test_cook_rejects_bad_input_without_publishing_a_handle( void )
 {
 	v3_block_material material = v3_test_block_material;
@@ -825,6 +880,7 @@ static int test_replace_block_grid_preserves_explicit_mass_and_cached_center( vo
 
 int main( void )
 {
+	ENSURE( test_all_creation_paths_share_recyclable_body_storage() == 0 );
 	ENSURE( test_replace_block_grid_rejects_invalid_and_failed_publications() == 0 );
 	ENSURE( test_replace_block_grid_preserves_explicit_mass_and_cached_center() == 0 );
 	ENSURE( test_replace_block_grid_derives_mass_and_retains_identity() == 0 );

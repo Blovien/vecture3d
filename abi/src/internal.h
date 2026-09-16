@@ -7,10 +7,10 @@
 
 #include <box3d/box3d.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define V3_MAX_BODIES_PER_BATCH UINT32_C( 4096 )
-#define V3_MAX_LOGICAL_BODY_IDS UINT32_C( 4096 )
 #define V3_MAX_HULL_POINTS UINT32_C( 64 )
 #define V3_MAX_BLOCK_GRID_ITEMS UINT32_C( 65534 )
 #define V3_MAX_JOINTS_PER_BATCH UINT32_C( 4096 )
@@ -55,6 +55,12 @@ typedef struct v3_body_entry
 	bool is_active;
 } v3_body_entry;
 
+typedef struct v3_body_generation
+{
+	uint64_t logical_id;
+	uint32_t generation;
+} v3_body_generation;
+
 typedef struct v3_joint_entry
 {
 	uint64_t logical_id;
@@ -77,7 +83,7 @@ typedef struct v3_body_identity
 typedef struct v3_block_contact_storage
 {
 	v3_block_contact_event events[V3_MAX_BLOCK_CONTACT_EVENTS];
-	v3_body_identity previous_body_identities[V3_MAX_LOGICAL_BODY_IDS];
+	v3_body_identity previous_body_identities[V3_MAX_BODIES_PER_BATCH];
 	uint32_t event_count;
 	uint32_t dropped_count;
 	uint32_t flags;
@@ -91,6 +97,9 @@ struct v3_world
 	uint32_t body_entry_count;
 	uint32_t body_entry_capacity;
 	uint32_t active_body_count;
+	v3_body_generation* body_generations;
+	size_t body_generation_count;
+	size_t body_generation_capacity;
 	v3_joint_entry* joint_entries;
 	uint32_t joint_entry_count;
 	uint32_t joint_entry_capacity;
@@ -118,7 +127,10 @@ v3_status v3_world_create_sphere_body_internal( v3_world* world, const v3_body_d
 int v3_geometry_find_body_entry_internal( const v3_world* world, uint64_t logical_id );
 bool v3_geometry_is_normalized_quaternion_internal( float x, float y, float z, float w );
 uint32_t v3_geometry_saturating_add_internal( uint32_t value, uint32_t increment );
-v3_status v3_geometry_reserve_body_entries_internal( v3_world* world, uint32_t required_capacity );
+v3_status v3_geometry_validate_body_generation_internal( const v3_world* world, uint64_t logical_id, uint32_t generation,
+														 bool removing, uint32_t* new_generation_count );
+v3_status v3_geometry_reserve_body_state_internal( v3_world* world, uint32_t active_capacity, uint32_t new_generation_count );
+void v3_geometry_publish_body_internal( v3_world* world, const v3_body_entry* entry );
 v3_status v3_cook_block_grid_internal( const v3_block_material* materials, uint32_t material_count, const v3_block_cell* cells,
 									   uint32_t cell_count, const v3_block_box* boxes, uint32_t box_count, v3_cooked_grid** out );
 v3_status v3_world_attach_block_grid_internal( v3_world* world, const v3_body_definition* body, v3_cooked_grid* grid,
@@ -145,6 +157,7 @@ typedef enum v3_test_fault
 	V3_TEST_FAULT_NONE,
 	V3_TEST_FAULT_WORLD_CALLOC,
 	V3_TEST_FAULT_BODY_ENTRIES_REALLOC,
+	V3_TEST_FAULT_BODY_GENERATIONS_CALLOC,
 	V3_TEST_FAULT_PENDING_CALLOC,
 	V3_TEST_FAULT_CREATE_BODY,
 	V3_TEST_FAULT_CREATE_SHAPE,

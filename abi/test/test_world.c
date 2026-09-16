@@ -55,17 +55,17 @@ _Static_assert( offsetof( v3_block_contact_side, material_index ) == 16, "v3_blo
 _Static_assert( offsetof( v3_block_contact_side, flags ) == 20, "v3_block_contact_side flags offset" );
 _Static_assert( offsetof( v3_block_contact_side, user_material_id ) == 24, "v3_block_contact_side material ID offset" );
 _Static_assert( offsetof( v3_block_contact_side, user_data ) == 32, "v3_block_contact_side data offset" );
-_Static_assert( sizeof( v3_block_contact_event ) == 176, "v3_block_contact_event size" );
+_Static_assert( sizeof( v3_block_contact_event ) == 192, "v3_block_contact_event size" );
 _Static_assert( offsetof( v3_block_contact_event, body_a ) == 0, "v3_block_contact_event body offset" );
 _Static_assert( offsetof( v3_block_contact_event, feature_id_a ) == 32, "v3_block_contact_event feature offset" );
 _Static_assert( offsetof( v3_block_contact_event, point_x ) == 48, "v3_block_contact_event point offset" );
-_Static_assert( offsetof( v3_block_contact_event, normal_x ) == 60, "v3_block_contact_event normal offset" );
-_Static_assert( offsetof( v3_block_contact_event, impulse_x ) == 72, "v3_block_contact_event impulse offset" );
-_Static_assert( offsetof( v3_block_contact_event, relative_normal_speed ) == 84, "v3_block_contact_event speed offset" );
-_Static_assert( offsetof( v3_block_contact_event, flags ) == 88, "v3_block_contact_event flags offset" );
-_Static_assert( offsetof( v3_block_contact_event, fixed_step_index ) == 92, "v3_block_contact_event step offset" );
-_Static_assert( offsetof( v3_block_contact_event, side_a ) == 96, "v3_block_contact_event side A offset" );
-_Static_assert( offsetof( v3_block_contact_event, side_b ) == 136, "v3_block_contact_event side B offset" );
+_Static_assert( offsetof( v3_block_contact_event, normal_x ) == 72, "v3_block_contact_event normal offset" );
+_Static_assert( offsetof( v3_block_contact_event, impulse_x ) == 84, "v3_block_contact_event impulse offset" );
+_Static_assert( offsetof( v3_block_contact_event, relative_normal_speed ) == 96, "v3_block_contact_event speed offset" );
+_Static_assert( offsetof( v3_block_contact_event, flags ) == 100, "v3_block_contact_event flags offset" );
+_Static_assert( offsetof( v3_block_contact_event, fixed_step_index ) == 104, "v3_block_contact_event step offset" );
+_Static_assert( offsetof( v3_block_contact_event, side_a ) == 112, "v3_block_contact_event side A offset" );
+_Static_assert( offsetof( v3_block_contact_event, side_b ) == 152, "v3_block_contact_event side B offset" );
 
 #define ENSURE( condition )                                                                                                      \
 	do                                                                                                                           \
@@ -281,7 +281,29 @@ static int test_generations_and_stale_removals( void )
 	return 0;
 }
 
-static int test_exact_body_and_logical_entry_limits( void )
+static int test_distinct_id_churn( void )
+{
+	v3_world* world = v3_world_create( 0.0, 0.0, 0.0, NULL );
+	ENSURE( world != NULL );
+	for ( uint64_t id = 1; id <= 3u * V3_TEST_BODY_LIMIT; ++id )
+	{
+		v3_box_body_command body = make_static_box( id, 1 );
+		ENSURE( v3_world_replace_box_bodies( world, NULL, 0, &body, 1 ) == V3_OK );
+		v3_body_handle removal = make_handle( id, 1 );
+		ENSURE( v3_world_replace_box_bodies( world, &removal, 1, NULL, 0 ) == V3_OK );
+	}
+	// Recycling simulation storage must not allow an old logical generation to return.
+	v3_box_body_command reused = make_static_box( 1, 1 );
+	ENSURE( v3_world_replace_box_bodies( world, NULL, 0, &reused, 1 ) == V3_INVALID_GENERATION );
+	reused.generation = 2;
+	ENSURE( v3_world_replace_box_bodies( world, NULL, 0, &reused, 1 ) == V3_OK );
+	v3_body_handle stale = make_handle( 1, 1 );
+	ENSURE( v3_world_replace_box_bodies( world, &stale, 1, NULL, 0 ) == V3_STALE_HANDLE );
+	v3_world_destroy( world );
+	return 0;
+}
+
+static int test_resident_body_limit_does_not_limit_lifetime_ids( void )
 {
 	v3_world* world = v3_world_create( 0.0, -9.81, 0.0, NULL );
 	ENSURE( world != NULL );
@@ -299,10 +321,11 @@ static int test_exact_body_and_logical_entry_limits( void )
 	}
 
 	ENSURE( v3_world_replace_box_bodies( world, NULL, 0, creations, V3_TEST_BODY_LIMIT ) == V3_OK );
-	ENSURE( v3_world_replace_box_bodies( world, removals, V3_TEST_BODY_LIMIT, NULL, 0 ) == V3_OK );
-
 	v3_box_body_command new_id = make_static_box( UINT64_C( 20000 ), UINT32_C( 1 ) );
 	ENSURE( v3_world_replace_box_bodies( world, NULL, 0, &new_id, 1 ) == V3_LIMIT_EXCEEDED );
+	ENSURE( v3_world_replace_box_bodies( world, removals, V3_TEST_BODY_LIMIT, NULL, 0 ) == V3_OK );
+
+	ENSURE( v3_world_replace_box_bodies( world, NULL, 0, &new_id, 1 ) == V3_OK );
 
 	free( removals );
 	free( creations );
@@ -357,6 +380,7 @@ static int test_replacement_churn( void )
 int main( void )
 {
 	uint32_t baseline = v3_active_world_count();
+	ENSURE( test_distinct_id_churn() == 0 );
 	ENSURE( test_world_sleep_limits_are_consistent_and_atomic() == 0 );
 	ENSURE( test_native_linear_speed_limit_bounds_motion() == 0 );
 	ENSURE( test_world_lifetime() == 0 );
@@ -364,7 +388,7 @@ int main( void )
 	ENSURE( test_atomic_validation() == 0 );
 	ENSURE( test_duplicate_ids() == 0 );
 	ENSURE( test_generations_and_stale_removals() == 0 );
-	ENSURE( test_exact_body_and_logical_entry_limits() == 0 );
+	ENSURE( test_resident_body_limit_does_not_limit_lifetime_ids() == 0 );
 	ENSURE( test_transient_peak_limit() == 0 );
 	ENSURE( test_replacement_churn() == 0 );
 	ENSURE( v3_active_world_count() == baseline );

@@ -188,6 +188,16 @@ static int test_distance_limit_and_attached_body_guard( void )
 	ENSURE( v3_world_replace_distance_joints( world, &joint, 1, NULL, 0 ) == V3_OK );
 	v3_body_handle removals[2] = { body_handle( bodies ), body_handle( bodies + 1 ) };
 	ENSURE( v3_world_replace_box_bodies( world, removals, 2, NULL, 0 ) == V3_OK );
+	bodies[0].generation = bodies[1].generation = 2;
+	ENSURE( v3_world_replace_box_bodies( world, NULL, 0, bodies, 2 ) == V3_OK );
+	coupler.generation = 2;
+	// A recycled slot must not satisfy the old joint's body-generation references.
+	ENSURE( v3_world_replace_distance_joints( world, NULL, 0, &coupler, 1 ) == V3_STALE_HANDLE );
+	coupler.body_a = body_handle( bodies );
+	coupler.body_b = body_handle( bodies + 1 );
+	ENSURE( v3_world_replace_distance_joints( world, NULL, 0, &coupler, 1 ) == V3_OK );
+	attached_body = body_handle( bodies );
+	ENSURE( v3_world_replace_box_bodies( world, &attached_body, 1, NULL, 0 ) == V3_JOINT_ATTACHED );
 
 	v3_world_destroy( world );
 	return 0;

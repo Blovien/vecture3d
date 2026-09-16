@@ -673,6 +673,14 @@ static int test_two_step_call_retains_first_step_block_contact_begin( void )
 	replacement.position_x = body.position_x;
 	ENSURE( v3_world_replace_box_bodies( world, &removal, 1, &replacement, 1 ) == V3_OK );
 
+	for ( uint64_t id = 10000; id < 15000; ++id )
+	{
+		v3_box_body_command transient = make_box( id, V3_STATIC_BODY, 100.0, 0.0, 0.0 );
+		ENSURE( v3_world_replace_box_bodies( world, NULL, 0, &transient, 1 ) == V3_OK );
+		v3_body_handle transient_handle = { .logical_id = id, .generation = 1 };
+		ENSURE( v3_world_replace_box_bodies( world, &transient_handle, 1, NULL, 0 ) == V3_OK );
+	}
+
 	ENSURE( v3_world_step_and_read( world, NULL, 0, NULL, 0, NULL, 0, 0, &transform, 1, NULL, 0, &stats ) == V3_OK );
 	ENSURE( stats.block_contact_event_count == 0 && stats.block_contact_event_dropped_count == 0 );
 	ENSURE( stats.step_milliseconds == 0.0f && stats.pair_milliseconds == 0.0f && stats.collide_milliseconds == 0.0f &&

@@ -44,6 +44,7 @@ public final class V3World implements AutoCloseable {
     private final Thread ownerThread;
     private final Arena arena;
     private final Map<Long, BodyState> bodies = new HashMap<>();
+    private final Map<Long, Integer> bodyGenerations = new HashMap<>();
     private final Map<Long, JointState> joints = new HashMap<>();
 
     private final NativeBuffer bodyHandleBuffer;
@@ -104,6 +105,12 @@ public final class V3World implements AutoCloseable {
         }
     }
 
+    /**
+     * Atomically replaces bodies. At most 4,096 bodies may be resident, and pending creations
+     * coexist with removals until commit, so the same limit also applies to that temporary peak.
+     * Distinct logical IDs have no fixed lifetime limit. Their last generations are retained until
+     * world close to reject stale reuse. New IDs start at one, and reuse advances by exactly one.
+     */
     public void replaceBoxBodies(List<V3BodyHandle> removals, List<V3BoxBodyCommand> creations) {
         requireOpenOwner();
         List<V3BodyHandle> removalValues = snapshot(removals, "removals");
@@ -415,6 +422,9 @@ public final class V3World implements AutoCloseable {
             nativeWorld = MemorySegment.NULL;
             closed = true;
             arena.close();
+            bodies.clear();
+            bodyGenerations.clear();
+            joints.clear();
         }
     }
 
@@ -434,28 +444,26 @@ public final class V3World implements AutoCloseable {
         }
 
         Set<Long> creationIds = new HashSet<>();
-        int newEntries = 0;
         for (BodyCreation creation : creations) {
             V3BodyHandle handle = creation.handle();
             if (!creationIds.add(handle.logicalId())) {
                 throw new IllegalArgumentException("body creations contain a duplicate logical ID");
             }
-            BodyState state = bodies.get(handle.logicalId());
-            if (state == null) {
+            Integer previousGeneration = bodyGenerations.get(handle.logicalId());
+            if (previousGeneration == null) {
                 if (handle.generation() != 1) {
                     throw new IllegalArgumentException("a new body must start at generation one");
                 }
-                newEntries++;
                 continue;
             }
-            if (state.active() && !removalIds.contains(handle.logicalId())) {
+            if (bodies.containsKey(handle.logicalId()) && !removalIds.contains(handle.logicalId())) {
                 throw new IllegalArgumentException("body logical ID is already active");
             }
-            requireNextGeneration(state.generation(), handle.generation(), "body");
+            requireNextGeneration(previousGeneration, handle.generation(), "body");
         }
 
         int finalCount = activeBodyCount - removals.size() + creations.size();
-        if (finalCount > MAX_BODIES || bodies.size() + newEntries > MAX_BODIES) {
+        if (finalCount > MAX_BODIES) {
             throw new IllegalArgumentException("body replacement exceeds the native limit");
         }
         if (activeBodyCount > MAX_BODIES - creations.size()) {
@@ -565,7 +573,7 @@ public final class V3World implements AutoCloseable {
 
         int movableCount = 0;
         for (BodyState state : bodies.values()) {
-            if (state.active() && state.kind() != V3BoxBodyCommand.Kind.STATIC) {
+            if (state.kind() != V3BoxBodyCommand.Kind.STATIC) {
                 movableCount++;
             }
         }
@@ -574,7 +582,7 @@ public final class V3World implements AutoCloseable {
 
     private BodyState requireActiveBody(V3BodyHandle handle) {
         BodyState state = bodies.get(handle.logicalId());
-        if (state == null || !state.active() || state.generation() != handle.generation()) {
+        if (state == null || state.generation() != handle.generation()) {
             throw new IllegalArgumentException("body handle is stale");
         }
         return state;
@@ -607,11 +615,12 @@ public final class V3World implements AutoCloseable {
 
     private void applyBodyPlan(BodyPlan plan) {
         for (V3BodyHandle removal : plan.removals()) {
-            bodies.computeIfPresent(removal.logicalId(), (_, previous) -> new BodyState(previous.generation(), previous.kind(), false));
+            bodies.remove(removal.logicalId());
         }
         for (BodyCreation creation : plan.creations()) {
             V3BodyHandle handle = creation.handle();
-            bodies.put(handle.logicalId(), new BodyState(handle.generation(), creation.kind(), true));
+            bodies.put(handle.logicalId(), new BodyState(handle.generation(), creation.kind()));
+            bodyGenerations.put(handle.logicalId(), handle.generation());
         }
         activeBodyCount = plan.finalCount();
     }
@@ -998,7 +1007,7 @@ public final class V3World implements AutoCloseable {
         }
     }
 
-    private record BodyState(int generation, V3BoxBodyCommand.Kind kind, boolean active) {
+    private record BodyState(int generation, V3BoxBodyCommand.Kind kind) {
     }
 
     private record BodyCreation(V3BodyHandle handle, V3BoxBodyCommand.Kind kind) {

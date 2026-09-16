@@ -501,10 +501,10 @@ typedef struct v3_block_contact_event
 	// Reserved fracture feature identifiers. They are zero until a later interface defines a source.
 	uint64_t feature_id_a;
 	uint64_t feature_id_b;
-	// Native double precision world positions are converted to this reserved float representation.
-	float point_x;
-	float point_y;
-	float point_z;
+	// Absolute world position, preserving native double precision at large world offsets.
+	double point_x;
+	double point_y;
+	double point_z;
 	float normal_x;
 	float normal_y;
 	float normal_z;

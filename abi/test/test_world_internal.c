@@ -42,6 +42,7 @@ static v3_body_handle make_handle( uint64_t logical_id, uint32_t generation )
 static int ensure_empty_world( const v3_world* world )
 {
 	ENSURE( world->body_entry_count == 0 );
+	ENSURE( world->body_generation_count == 0 );
 	ENSURE( world->active_body_count == 0 );
 	ENSURE( world->mutation_batch_count == 0 );
 	ENSURE( world->created_body_count == 0 );
@@ -93,6 +94,7 @@ static int test_pending_allocation_failure_does_not_publish_logical_id( void )
 	ENSURE( v3_world_replace_box_bodies_internal( world, &removal, 1, NULL, 0 ) == V3_OK );
 
 	uint32_t entry_count = world->body_entry_count;
+	size_t generation_count = world->body_generation_count;
 	uint32_t mutation_count = world->mutation_batch_count;
 	uint32_t created_count = world->created_body_count;
 	uint32_t destroyed_count = world->destroyed_body_count;
@@ -100,6 +102,7 @@ static int test_pending_allocation_failure_does_not_publish_logical_id( void )
 	v3_test_fail_after( V3_TEST_FAULT_PENDING_CALLOC, 0 );
 	ENSURE( v3_world_replace_box_bodies_internal( world, NULL, 0, &command, 1 ) == V3_OUT_OF_MEMORY );
 	ENSURE( world->body_entry_count == entry_count );
+	ENSURE( world->body_generation_count == generation_count );
 	ENSURE( world->active_body_count == 0 );
 	ENSURE( world->mutation_batch_count == mutation_count );
 	ENSURE( world->created_body_count == created_count );
@@ -107,6 +110,70 @@ static int test_pending_allocation_failure_does_not_publish_logical_id( void )
 	ENSURE( b3World_GetCounters( world->world_id ).bodyCount == 0 );
 	ENSURE( v3_world_replace_box_bodies_internal( world, NULL, 0, &command, 1 ) == V3_OK );
 
+	v3_world_destroy_internal( world );
+	return 0;
+}
+
+static int test_history_growth_failure_preserves_bodies_and_generations( void )
+{
+	v3_world* world = v3_world_create_internal( 0.0, 0.0, 0.0, NULL );
+	ENSURE( world != NULL );
+	// Reach a history-table growth boundary, retaining just one live body.
+	for ( uint64_t id = 1; id <= 16; ++id )
+	{
+		v3_box_body_command command = make_static_box( id, 1 );
+		ENSURE( v3_world_replace_box_bodies_internal( world, NULL, 0, &command, 1 ) == V3_OK );
+		if ( id < 16 )
+		{
+			v3_body_handle removal = make_handle( id, 1 );
+			ENSURE( v3_world_replace_box_bodies_internal( world, &removal, 1, NULL, 0 ) == V3_OK );
+		}
+	}
+	v3_box_body_command commands[] = { make_static_box( 16, 2 ), make_static_box( 17, 1 ) };
+	v3_body_handle removal = make_handle( 16, 1 );
+	uint32_t mutations = world->mutation_batch_count;
+	v3_test_fail_after( V3_TEST_FAULT_BODY_GENERATIONS_CALLOC, 0 );
+	ENSURE( v3_world_replace_box_bodies_internal( world, &removal, 1, commands, 2 ) == V3_OUT_OF_MEMORY );
+	ENSURE( world->body_entry_count == 1 && world->active_body_count == 1 );
+	ENSURE( world->body_generation_count == 16 && world->mutation_batch_count == mutations );
+	ENSURE( b3World_GetCounters( world->world_id ).bodyCount == 1 );
+	// A native creation failure after history growth must also leave both generations unconsumed.
+	v3_test_fail_after( V3_TEST_FAULT_CREATE_SHAPE, 1 );
+	ENSURE( v3_world_replace_box_bodies_internal( world, &removal, 1, commands, 2 ) == V3_NATIVE_FAILURE );
+	ENSURE( world->body_generation_count == 16 && world->mutation_batch_count == mutations );
+	ENSURE( b3World_GetCounters( world->world_id ).bodyCount == 1 );
+	ENSURE( v3_world_replace_box_bodies_internal( world, &removal, 1, commands, 2 ) == V3_OK );
+	ENSURE( world->body_generation_count == 17 );
+	ENSURE( v3_world_replace_box_bodies_internal( world, &removal, 1, NULL, 0 ) == V3_STALE_HANDLE );
+	v3_world_destroy_internal( world );
+	return 0;
+}
+
+static int test_final_generation_cannot_wrap_after_slot_recycling( void )
+{
+	v3_world* world = v3_world_create_internal( 0.0, 0.0, 0.0, NULL );
+	ENSURE( world != NULL );
+	v3_box_body_command body = make_static_box( 1, 1 );
+	ENSURE( v3_world_replace_box_bodies_internal( world, NULL, 0, &body, 1 ) == V3_OK );
+	// Seed the penultimate generation instead of performing two billion replacements.
+	world->body_entries[0].generation = INT32_MAX - 1u;
+	for ( size_t index = 0; index < world->body_generation_capacity; ++index )
+	{
+		if ( world->body_generations[index].logical_id == 1 )
+		{
+			world->body_generations[index].generation = INT32_MAX - 1u;
+		}
+	}
+	v3_body_handle removal = make_handle( 1, INT32_MAX - 1u );
+	body.generation = INT32_MAX;
+	ENSURE( v3_world_replace_box_bodies_internal( world, &removal, 1, &body, 1 ) == V3_OK );
+	removal.generation = INT32_MAX;
+	ENSURE( v3_world_replace_box_bodies_internal( world, &removal, 1, NULL, 0 ) == V3_OK );
+	body.generation = 1;
+	ENSURE( v3_world_replace_box_bodies_internal( world, NULL, 0, &body, 1 ) == V3_GENERATION_EXHAUSTED );
+	body.logical_id = 2;
+	ENSURE( v3_world_replace_box_bodies_internal( world, NULL, 0, &body, 1 ) == V3_OK );
+	ENSURE( v3_world_replace_box_bodies_internal( world, &removal, 1, NULL, 0 ) == V3_STALE_HANDLE );
 	v3_world_destroy_internal( world );
 	return 0;
 }
@@ -173,6 +240,8 @@ int main( void )
 	ENSURE( test_world_allocation_failure_does_not_publish_world() == 0 );
 	ENSURE( test_block_contact_storage_failure_does_not_publish_world() == 0 );
 	ENSURE( test_entry_allocation_failure_does_not_publish_logical_id() == 0 );
+	ENSURE( test_history_growth_failure_preserves_bodies_and_generations() == 0 );
+	ENSURE( test_final_generation_cannot_wrap_after_slot_recycling() == 0 );
 	ENSURE( test_pending_allocation_failure_does_not_publish_logical_id() == 0 );
 	ENSURE( test_body_creation_failure_rolls_back_pending_body() == 0 );
 	ENSURE( test_shape_creation_failure_rolls_back_current_and_pending_bodies() == 0 );

@@ -117,7 +117,7 @@ static bool v3_is_normalized_quaternion( float x, float y, float z, float w )
 		   length_squared < 1.0f + 20.0f * FLT_EPSILON;
 }
 
-static int v3_find_body_entry( const v3_world* world, uint64_t logical_id )
+int v3_geometry_find_body_entry_internal( const v3_world* world, uint64_t logical_id )
 {
 	for ( uint32_t index = 0; index < world->body_entry_count; ++index )
 	{
@@ -161,7 +161,7 @@ static v3_status v3_validate_removals( const v3_world* world, const v3_body_hand
 			}
 		}
 
-		int entry_index = v3_find_body_entry( world, removal->logical_id );
+		int entry_index = v3_geometry_find_body_entry_internal( world, removal->logical_id );
 		if ( entry_index < 0 || !world->body_entries[entry_index].is_active ||
 			 world->body_entries[entry_index].generation != removal->generation )
 		{
@@ -252,33 +252,15 @@ static v3_status v3_validate_creations( const v3_world* world, const v3_body_han
 			}
 		}
 
-		int entry_index = v3_find_body_entry( world, creation->logical_id );
-		if ( entry_index < 0 )
+		uint32_t new_generation_count = 0;
+		status = v3_geometry_validate_body_generation_internal(
+			world, creation->logical_id, creation->generation,
+			v3_removes_logical_id( removals, removal_count, creation->logical_id ), &new_generation_count );
+		if ( status != V3_OK )
 		{
-			if ( creation->generation != 1 )
-			{
-				return V3_INVALID_GENERATION;
-			}
-
-			*new_entry_count += 1;
-			continue;
+			return status;
 		}
-
-		const v3_body_entry* entry = world->body_entries + entry_index;
-		if ( entry->is_active && !v3_removes_logical_id( removals, removal_count, creation->logical_id ) )
-		{
-			return V3_DUPLICATE_ID;
-		}
-
-		if ( entry->generation == INT32_MAX )
-		{
-			return V3_GENERATION_EXHAUSTED;
-		}
-
-		if ( creation->generation != entry->generation + 1u )
-		{
-			return V3_INVALID_GENERATION;
-		}
+		*new_entry_count += new_generation_count;
 	}
 
 	return V3_OK;
@@ -294,7 +276,7 @@ static v3_status v3_reserve_body_entries( v3_world* world, uint32_t required_cap
 	uint32_t new_capacity = world->body_entry_capacity == 0 ? UINT32_C( 16 ) : world->body_entry_capacity;
 	while ( new_capacity < required_capacity )
 	{
-		new_capacity = new_capacity > V3_MAX_LOGICAL_BODY_IDS / 2u ? V3_MAX_LOGICAL_BODY_IDS : new_capacity * 2u;
+		new_capacity = new_capacity > V3_MAX_BODIES_PER_BATCH / 2u ? V3_MAX_BODIES_PER_BATCH : new_capacity * 2u;
 	}
 
 	v3_body_entry* entries =
@@ -307,6 +289,102 @@ static v3_status v3_reserve_body_entries( v3_world* world, uint32_t required_cap
 	world->body_entries = entries;
 	world->body_entry_capacity = new_capacity;
 	return V3_OK;
+}
+
+static size_t v3_body_generation_slot( const v3_body_generation* entries, size_t capacity, uint64_t logical_id )
+{
+	uint64_t hash = logical_id;
+	hash = ( hash ^ ( hash >> 30u ) ) * UINT64_C( 0xbf58476d1ce4e5b9 );
+	hash = ( hash ^ ( hash >> 27u ) ) * UINT64_C( 0x94d049bb133111eb );
+	hash ^= hash >> 31u;
+	size_t slot = (size_t)hash & ( capacity - 1u );
+	while ( entries[slot].logical_id != 0 && entries[slot].logical_id != logical_id )
+	{
+		slot = ( slot + 1u ) & ( capacity - 1u );
+	}
+	return slot;
+}
+
+v3_status v3_geometry_validate_body_generation_internal( const v3_world* world, uint64_t logical_id, uint32_t generation,
+														 bool removing, uint32_t* new_generation_count )
+{
+	*new_generation_count = 0;
+	if ( !removing && v3_geometry_find_body_entry_internal( world, logical_id ) >= 0 )
+	{
+		return V3_DUPLICATE_ID;
+	}
+	uint32_t previous = 0;
+	if ( world->body_generation_capacity > 0 )
+	{
+		size_t slot = v3_body_generation_slot( world->body_generations, world->body_generation_capacity, logical_id );
+		previous = world->body_generations[slot].generation;
+	}
+	if ( previous == INT32_MAX )
+	{
+		return V3_GENERATION_EXHAUSTED;
+	}
+	if ( generation != previous + 1u )
+	{
+		return V3_INVALID_GENERATION;
+	}
+	*new_generation_count = previous == 0 ? 1u : 0u;
+	return V3_OK;
+}
+
+v3_status v3_geometry_reserve_body_state_internal( v3_world* world, uint32_t active_capacity, uint32_t new_generation_count )
+{
+	v3_status status = v3_reserve_body_entries( world, active_capacity );
+	if ( status != V3_OK )
+	{
+		return status;
+	}
+	if ( new_generation_count > SIZE_MAX - world->body_generation_count )
+	{
+		return V3_OUT_OF_MEMORY;
+	}
+	size_t required = world->body_generation_count + new_generation_count;
+	if ( required <= world->body_generation_capacity / 2u )
+	{
+		return V3_OK;
+	}
+	size_t capacity = world->body_generation_capacity == 0 ? 32u : world->body_generation_capacity;
+	while ( required > capacity / 2u )
+	{
+		if ( capacity > SIZE_MAX / 2u / sizeof( v3_body_generation ) )
+		{
+			return V3_OUT_OF_MEMORY;
+		}
+		capacity *= 2u;
+	}
+	v3_body_generation* entries = v3_calloc( V3_TEST_FAULT_BODY_GENERATIONS_CALLOC, capacity, sizeof( *entries ) );
+	if ( entries == NULL )
+	{
+		return V3_OUT_OF_MEMORY;
+	}
+	for ( size_t index = 0; index < world->body_generation_capacity; ++index )
+	{
+		v3_body_generation entry = world->body_generations[index];
+		if ( entry.logical_id != 0 )
+		{
+			entries[v3_body_generation_slot( entries, capacity, entry.logical_id )] = entry;
+		}
+	}
+	free( world->body_generations );
+	world->body_generations = entries;
+	world->body_generation_capacity = capacity;
+	return V3_OK;
+}
+
+void v3_geometry_publish_body_internal( v3_world* world, const v3_body_entry* entry )
+{
+	size_t slot = v3_body_generation_slot( world->body_generations, world->body_generation_capacity, entry->logical_id );
+	if ( world->body_generations[slot].logical_id == 0 )
+	{
+		world->body_generation_count += 1u;
+	}
+	world->body_generations[slot] = (v3_body_generation){ .logical_id = entry->logical_id, .generation = entry->generation };
+	world->body_entries[world->body_entry_count] = *entry;
+	world->body_entries[world->body_entry_count++].is_active = true;
 }
 
 static void v3_destroy_body_entry( v3_body_entry* entry )
@@ -399,7 +477,7 @@ v3_status v3_world_replace_box_bodies_internal( v3_world* world, const v3_body_h
 	}
 
 	uint32_t final_body_count = world->active_body_count - removal_count + creation_count;
-	if ( final_body_count > V3_MAX_BODIES_PER_BATCH || world->body_entry_count + new_entry_count > V3_MAX_LOGICAL_BODY_IDS )
+	if ( final_body_count > V3_MAX_BODIES_PER_BATCH )
 	{
 		return V3_LIMIT_EXCEEDED;
 	}
@@ -410,7 +488,7 @@ v3_status v3_world_replace_box_bodies_internal( v3_world* world, const v3_body_h
 		return V3_PEAK_LIMIT_EXCEEDED;
 	}
 
-	status = v3_reserve_body_entries( world, world->body_entry_count + new_entry_count );
+	status = v3_geometry_reserve_body_state_internal( world, final_body_count, new_entry_count );
 	if ( status != V3_OK )
 	{
 		return status;
@@ -488,28 +566,32 @@ v3_status v3_world_replace_box_bodies_internal( v3_world* world, const v3_body_h
 
 	for ( uint32_t index = 0; index < removal_count; ++index )
 	{
-		int entry_index = v3_find_body_entry( world, removals[index].logical_id );
+		int entry_index = v3_geometry_find_body_entry_internal( world, removals[index].logical_id );
 		v3_destroy_body_entry( world->body_entries + entry_index );
 	}
+
+	uint32_t survivor_count = 0;
+	for ( uint32_t index = 0; index < world->body_entry_count; ++index )
+	{
+		if ( world->body_entries[index].is_active )
+		{
+			world->body_entries[survivor_count++] = world->body_entries[index];
+		}
+	}
+	world->body_entry_count = survivor_count;
 
 	// Logical generations become visible only after all native bodies and shapes exist
 	for ( uint32_t index = 0; index < creation_count; ++index )
 	{
 		const v3_pending_body* created = pending + index;
-		int entry_index = v3_find_body_entry( world, created->logical_id );
-		if ( entry_index < 0 )
-		{
-			entry_index = (int)world->body_entry_count++;
-		}
-
-		world->body_entries[entry_index] = (v3_body_entry){
+		v3_body_entry entry = {
 			.logical_id = created->logical_id,
 			.generation = created->generation,
 			.body_id = created->body_id,
 			.shape_id = created->shape_id,
 			.kind = created->kind,
-			.is_active = true,
 		};
+		v3_geometry_publish_body_internal( world, &entry );
 	}
 
 	world->active_body_count = final_body_count;
@@ -533,6 +615,7 @@ void v3_world_destroy_internal( v3_world* world )
 
 	b3DestroyWorld( world->world_id );
 	free( world->body_entries );
+	free( world->body_generations );
 	free( world->block_contacts );
 	free( world );
 }
