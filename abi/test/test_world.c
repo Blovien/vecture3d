@@ -55,17 +55,17 @@ _Static_assert( offsetof( v3_block_contact_side, material_index ) == 16, "v3_blo
 _Static_assert( offsetof( v3_block_contact_side, flags ) == 20, "v3_block_contact_side flags offset" );
 _Static_assert( offsetof( v3_block_contact_side, user_material_id ) == 24, "v3_block_contact_side material ID offset" );
 _Static_assert( offsetof( v3_block_contact_side, user_data ) == 32, "v3_block_contact_side data offset" );
-_Static_assert( sizeof( v3_block_contact_event ) == 176, "v3_block_contact_event size" );
+_Static_assert( sizeof( v3_block_contact_event ) == 192, "v3_block_contact_event size" );
 _Static_assert( offsetof( v3_block_contact_event, body_a ) == 0, "v3_block_contact_event body offset" );
 _Static_assert( offsetof( v3_block_contact_event, feature_id_a ) == 32, "v3_block_contact_event feature offset" );
 _Static_assert( offsetof( v3_block_contact_event, point_x ) == 48, "v3_block_contact_event point offset" );
-_Static_assert( offsetof( v3_block_contact_event, normal_x ) == 60, "v3_block_contact_event normal offset" );
-_Static_assert( offsetof( v3_block_contact_event, impulse_x ) == 72, "v3_block_contact_event impulse offset" );
-_Static_assert( offsetof( v3_block_contact_event, relative_normal_speed ) == 84, "v3_block_contact_event speed offset" );
-_Static_assert( offsetof( v3_block_contact_event, flags ) == 88, "v3_block_contact_event flags offset" );
-_Static_assert( offsetof( v3_block_contact_event, fixed_step_index ) == 92, "v3_block_contact_event step offset" );
-_Static_assert( offsetof( v3_block_contact_event, side_a ) == 96, "v3_block_contact_event side A offset" );
-_Static_assert( offsetof( v3_block_contact_event, side_b ) == 136, "v3_block_contact_event side B offset" );
+_Static_assert( offsetof( v3_block_contact_event, normal_x ) == 72, "v3_block_contact_event normal offset" );
+_Static_assert( offsetof( v3_block_contact_event, impulse_x ) == 84, "v3_block_contact_event impulse offset" );
+_Static_assert( offsetof( v3_block_contact_event, relative_normal_speed ) == 96, "v3_block_contact_event speed offset" );
+_Static_assert( offsetof( v3_block_contact_event, flags ) == 100, "v3_block_contact_event flags offset" );
+_Static_assert( offsetof( v3_block_contact_event, fixed_step_index ) == 104, "v3_block_contact_event step offset" );
+_Static_assert( offsetof( v3_block_contact_event, side_a ) == 112, "v3_block_contact_event side A offset" );
+_Static_assert( offsetof( v3_block_contact_event, side_b ) == 152, "v3_block_contact_event side B offset" );
 
 #define ENSURE( condition )                                                                                                      \
 	do                                                                                                                           \

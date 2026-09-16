@@ -4,7 +4,7 @@ import java.util.Objects;
 
 /**
  * A detached contact transition. The normal points from side A to side B, and the impulse is the
- * native normal impulse along that direction. Positions use the ABI's float world coordinates.
+ * native normal impulse along that direction. Positions use double-precision world coordinates.
  * End events retain the last known payload, including a body generation that may no longer exist.
  */
 public record V3BlockContactEvent(
@@ -12,9 +12,9 @@ public record V3BlockContactEvent(
     int fixedStepIndex,
     V3BlockContactSide sideA,
     V3BlockContactSide sideB,
-    float pointX,
-    float pointY,
-    float pointZ,
+    double pointX,
+    double pointY,
+    double pointZ,
     float normalX,
     float normalY,
     float normalZ,
@@ -33,8 +33,9 @@ public record V3BlockContactEvent(
         if (!sideA.blockGrid() && !sideB.blockGrid()) {
             throw new IllegalArgumentException("a BlockGrid contact requires at least one grid side");
         }
-        if (!V3BoxBodyCommand.allFinite(
-            pointX, pointY, pointZ, normalX, normalY, normalZ,
+        if (!Double.isFinite(pointX) || !Double.isFinite(pointY) || !Double.isFinite(pointZ)
+            || !V3BoxBodyCommand.allFinite(
+            normalX, normalY, normalZ,
             impulseX, impulseY, impulseZ, relativeNormalSpeed
         ) || relativeNormalSpeed < 0.0f) {
             throw new IllegalArgumentException("contact values must be finite and approach speed non-negative");

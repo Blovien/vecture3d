@@ -465,17 +465,17 @@
                 {
                     "name": "point_x",
                     "ordinal": 4,
-                    "type": "float"
+                    "type": "double"
                 },
                 {
                     "name": "point_y",
                     "ordinal": 5,
-                    "type": "float"
+                    "type": "double"
                 },
                 {
                     "name": "point_z",
                     "ordinal": 6,
-                    "type": "float"
+                    "type": "double"
                 },
                 {
                     "name": "relative_normal_speed",

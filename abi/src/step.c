@@ -123,9 +123,9 @@ static bool v3_step_translate_contact_event( const v3_world* world, const v3Bloc
 	*event = (v3_block_contact_event){
 		.body_a = { .logical_id = body_a.logical_id, .generation = body_a.generation },
 		.body_b = { .logical_id = body_b.logical_id, .generation = body_b.generation },
-		.point_x = (float)source->point.x,
-		.point_y = (float)source->point.y,
-		.point_z = (float)source->point.z,
+		.point_x = source->point.x,
+		.point_y = source->point.y,
+		.point_z = source->point.z,
 		.normal_x = source->normal.x,
 		.normal_y = source->normal.y,
 		.normal_z = source->normal.z,
