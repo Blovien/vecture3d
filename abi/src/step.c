@@ -150,10 +150,10 @@ static void v3_step_add_dropped_events( v3_block_contact_storage* storage, uint3
 	}
 }
 
-static void v3_step_append_contact_events( const v3_world* world, const v3BlockContactEvent* sources, int count, uint32_t kind,
+static void v3_step_append_contact_events( const v3_world* world, v3_block_contact_storage* storage,
+										   const v3BlockContactEvent* sources, int count, uint32_t kind,
 										   uint32_t fixed_step_index )
 {
-	v3_block_contact_storage* storage = world->block_contacts;
 	for ( int index = 0; index < count; ++index )
 	{
 		if ( storage->event_count == V3_MAX_BLOCK_CONTACT_EVENTS )
@@ -171,7 +171,7 @@ static void v3_step_append_contact_events( const v3_world* world, const v3BlockC
 	}
 }
 
-static void v3_step_collect_contact_events( const v3_world* world, uint32_t fixed_step_index )
+static void v3_step_collect_contact_events( v3_world* world, uint32_t fixed_step_index )
 {
 	v3_block_contact_storage* storage = world->block_contacts;
 	v3BlockContactEvents events = v3World_GetBlockContactEvents( world->world_id );
@@ -182,9 +182,9 @@ static void v3_step_collect_contact_events( const v3_world* world, uint32_t fixe
 	v3_step_add_dropped_events( storage, events.droppedEndCount );
 	v3_step_add_dropped_events( storage, events.droppedBeginCount );
 	v3_step_add_dropped_events( storage, events.droppedHitCount );
-	v3_step_append_contact_events( world, events.endEvents, events.endCount, V3_BLOCK_CONTACT_END, fixed_step_index );
-	v3_step_append_contact_events( world, events.beginEvents, events.beginCount, V3_BLOCK_CONTACT_BEGIN, fixed_step_index );
-	v3_step_append_contact_events( world, events.hitEvents, events.hitCount, V3_BLOCK_CONTACT_HIT, fixed_step_index );
+	v3_step_append_contact_events( world, storage, events.endEvents, events.endCount, V3_BLOCK_CONTACT_END, fixed_step_index );
+	v3_step_append_contact_events( world, storage, events.beginEvents, events.beginCount, V3_BLOCK_CONTACT_BEGIN, fixed_step_index );
+	v3_step_append_contact_events( world, storage, events.hitEvents, events.hitCount, V3_BLOCK_CONTACT_HIT, fixed_step_index );
 }
 
 static void v3_step_refresh_body_identities( v3_world* world )

@@ -235,7 +235,7 @@ bool b3RemoveKey( b3HashSet* set, uint64_t key )
 
 // This function is here because ctz.h is included by
 // this file but not in bitset.c
-int b3CountSetBits( b3BitSet* bitSet )
+int b3CountSetBits( const b3BitSet* bitSet )
 {
 	int popCount = 0;
 	uint32_t blockCount = bitSet->blockCount;

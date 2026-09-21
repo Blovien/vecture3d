@@ -142,8 +142,8 @@ static bool v3MakeRecord( b3World* world, const b3Contact* contact, int manifold
 	const b3Shape* shapeB = b3Array_Get( world->shapes, contact->shapeIdB );
 	const b3Body* bodyA = b3Array_Get( world->bodies, shapeA->bodyId );
 	const b3Body* bodyB = b3Array_Get( world->bodies, shapeB->bodyId );
-	b3BodySim* simA = b3GetBodySim( world, (b3Body*)bodyA );
-	b3BodySim* simB = b3GetBodySim( world, (b3Body*)bodyB );
+	const b3BodySim* simA = b3GetBodySim( world, bodyA );
+	const b3BodySim* simB = b3GetBodySim( world, bodyB );
 	const b3Manifold* manifold = contact->manifolds + manifoldIndex;
 	const b3ManifoldPoint* mp = manifold->points + pointIndex;
 	b3Pos midCenter = b3LerpPosition( simA->center, simB->center, 0.5f );

@@ -65,7 +65,7 @@ v3_status v3_world_set_limits( v3_world* world, const v3_world_limits* limits )
 	return V3_OK;
 }
 
-v3_status v3_world_get_limits( v3_world* world, v3_world_limits* limits )
+v3_status v3_world_get_limits( const v3_world* world, v3_world_limits* limits )
 {
 	if ( world == NULL || limits == NULL )
 	{
@@ -136,7 +136,7 @@ v3_status v3_cook_block_grid( const v3_block_material* materials, uint32_t mater
 	return v3_cook_block_grid_internal( materials, material_count, cells, cell_count, boxes, box_count, out );
 }
 
-v3_status v3_world_attach_block_grid( v3_world* world, const v3_body_definition* body, v3_cooked_grid* grid,
+v3_status v3_world_attach_block_grid( v3_world* world, const v3_body_definition* body, const v3_cooked_grid* grid,
 									  const v3_mass_properties* mass_override, v3_body_handle* out )
 {
 	if ( world == NULL || body == NULL || grid == NULL || out == NULL )
@@ -147,7 +147,7 @@ v3_status v3_world_attach_block_grid( v3_world* world, const v3_body_definition*
 	return v3_world_attach_block_grid_internal( world, body, grid, mass_override, out );
 }
 
-v3_status v3_world_replace_block_grid( v3_world* world, const v3_body_handle* body, v3_cooked_grid* grid )
+v3_status v3_world_replace_block_grid( v3_world* world, const v3_body_handle* body, const v3_cooked_grid* grid )
 {
 	if ( world == NULL || body == NULL || grid == NULL )
 	{

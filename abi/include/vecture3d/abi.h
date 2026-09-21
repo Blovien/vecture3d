@@ -618,7 +618,7 @@ V3_API uint64_t v3_abi_schema_hash( void );
 // A NULL limits pointer selects the engine defaults for every limit.
 V3_API v3_world* v3_world_create( double gravity_x, double gravity_y, double gravity_z, const v3_world_limits* limits );
 V3_API v3_status v3_world_set_limits( v3_world* world, const v3_world_limits* limits );
-V3_API v3_status v3_world_get_limits( v3_world* world, v3_world_limits* limits );
+V3_API v3_status v3_world_get_limits( const v3_world* world, v3_world_limits* limits );
 V3_API v3_status v3_world_replace_box_bodies( v3_world* world, const v3_body_handle* removals, uint32_t removal_count,
 											  const v3_box_body_command* creations, uint32_t creation_count );
 V3_API v3_status v3_world_create_hull_body( v3_world* world, const v3_box_body_command* command, const float* point_xyz,
@@ -638,7 +638,7 @@ V3_API v3_status v3_cook_block_grid( const v3_block_material* materials, uint32_
 // Create body and attach grid, retaining its geometry. The caller may then destroy grid.
 // A NULL mass_override derives mass from geometry. An override must be finite, with positive mass
 // and a positive definite inertia tensor. Success writes the new body handle to *out.
-V3_API v3_status v3_world_attach_block_grid( v3_world* world, const v3_body_definition* body, v3_cooked_grid* grid,
+V3_API v3_status v3_world_attach_block_grid( v3_world* world, const v3_body_definition* body, const v3_cooked_grid* grid,
 											 const v3_mass_properties* mass_override, v3_body_handle* out );
 /// Replace geometry between steps using live world, body, and grid handles. Success retains grid
 /// and preserves body and shape IDs, pose, filters, event flags, and angular velocity.
@@ -646,7 +646,7 @@ V3_API v3_status v3_world_attach_block_grid( v3_world* world, const v3_body_defi
 /// with world center displacement to linear velocity. Explicit mass and cached center are unchanged.
 /// Rebuild contacts, which may emit END then BEGIN for retained cells. Wake the body and increment
 /// mutation and replacement counters once. Failure preserves geometry and observable body state.
-V3_API v3_status v3_world_replace_block_grid( v3_world* world, const v3_body_handle* body, v3_cooked_grid* grid );
+V3_API v3_status v3_world_replace_block_grid( v3_world* world, const v3_body_handle* body, const v3_cooked_grid* grid );
 // Release the handle's one reference to its cooked data. NULL is accepted. Cooked bytes survive
 // until the last reference, from any shape or any world, is gone.
 V3_API void v3_destroy_cooked_grid( v3_cooked_grid* grid );

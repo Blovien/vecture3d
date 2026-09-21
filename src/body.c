@@ -51,7 +51,7 @@ b3BodyId b3MakeBodyId( b3World* world, int bodyId )
 	return (b3BodyId){ bodyId + 1, world->worldId, body->generation };
 }
 
-b3BodySim* b3GetBodySim( b3World* world, b3Body* body )
+b3BodySim* b3GetBodySim( b3World* world, const b3Body* body )
 {
 	b3SolverSet* set = b3Array_Get( world->solverSets, body->setIndex );
 	b3BodySim* bodySim = b3Array_Get( set->bodySims, body->localIndex );

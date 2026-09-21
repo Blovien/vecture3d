@@ -22,7 +22,7 @@ void b3DestroyBitSet( b3BitSet* bitSet );
 void b3SetBitCountAndClear( b3BitSet* bitSet, uint32_t bitCount );
 void b3InPlaceUnion( b3BitSet* setA, const b3BitSet* setB );
 void b3GrowBitSet( b3BitSet* bitSet, uint32_t blockCount );
-int b3CountSetBits( b3BitSet* bitSet );
+int b3CountSetBits( const b3BitSet* bitSet );
 
 static inline void b3SetBit( b3BitSet* bitSet, uint32_t bitIndex )
 {

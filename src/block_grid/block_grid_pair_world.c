@@ -132,12 +132,12 @@ static bool v3BlockGridPairContactCanUpdate( const b3World* world, const b3Conta
 static v3BlockGridPairUpdateInput v3BlockGridPairMakeWorldInput( b3World* world, b3Contact* contact, float timeStep,
 																 int subStepCount )
 {
-	b3Shape* shapeA = b3Array_Get( world->shapes, contact->shapeIdA );
-	b3Shape* shapeB = b3Array_Get( world->shapes, contact->shapeIdB );
-	b3Body* bodyA = b3Array_Get( world->bodies, shapeA->bodyId );
-	b3Body* bodyB = b3Array_Get( world->bodies, shapeB->bodyId );
-	b3BodySim* bodySimA = b3GetBodySim( world, bodyA );
-	b3BodySim* bodySimB = b3GetBodySim( world, bodyB );
+	const b3Shape* shapeA = b3Array_Get( world->shapes, contact->shapeIdA );
+	const b3Shape* shapeB = b3Array_Get( world->shapes, contact->shapeIdB );
+	const b3Body* bodyA = b3Array_Get( world->bodies, shapeA->bodyId );
+	const b3Body* bodyB = b3Array_Get( world->bodies, shapeB->bodyId );
+	const b3BodySim* bodySimA = b3GetBodySim( world, bodyA );
+	const b3BodySim* bodySimB = b3GetBodySim( world, bodyB );
 
 	float motionA = v3BlockGridPairMotionDistance( world, bodyA, bodySimA, timeStep, subStepCount );
 	float motionB = v3BlockGridPairMotionDistance( world, bodyB, bodySimB, timeStep, subStepCount );
