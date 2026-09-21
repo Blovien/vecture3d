@@ -2342,7 +2342,7 @@
         {
             "kind": "function",
             "name": "v3_world_attach_block_grid",
-            "type": "v3_status (v3_world *, const v3_body_definition *, v3_cooked_grid *, const v3_mass_properties *, v3_body_handle *)",
+            "type": "v3_status (v3_world *, const v3_body_definition *, const v3_cooked_grid *, const v3_mass_properties *, v3_body_handle *)",
             "parameters": [
                 {
                     "name": "world",
@@ -2357,7 +2357,7 @@
                 {
                     "name": "grid",
                     "ordinal": 2,
-                    "type": "v3_cooked_grid *"
+                    "type": "const v3_cooked_grid *"
                 },
                 {
                     "name": "mass_override",
@@ -2504,12 +2504,12 @@
         {
             "kind": "function",
             "name": "v3_world_get_limits",
-            "type": "v3_status (v3_world *, v3_world_limits *)",
+            "type": "v3_status (const v3_world *, v3_world_limits *)",
             "parameters": [
                 {
                     "name": "world",
                     "ordinal": 0,
-                    "type": "v3_world *"
+                    "type": "const v3_world *"
                 },
                 {
                     "name": "limits",
@@ -2552,7 +2552,7 @@
         {
             "kind": "function",
             "name": "v3_world_replace_block_grid",
-            "type": "v3_status (v3_world *, const v3_body_handle *, v3_cooked_grid *)",
+            "type": "v3_status (v3_world *, const v3_body_handle *, const v3_cooked_grid *)",
             "parameters": [
                 {
                     "name": "world",
@@ -2567,7 +2567,7 @@
                 {
                     "name": "grid",
                     "ordinal": 2,
-                    "type": "v3_cooked_grid *"
+                    "type": "const v3_cooked_grid *"
                 }
             ]
         },

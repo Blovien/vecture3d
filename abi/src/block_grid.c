@@ -340,7 +340,7 @@ static v3_status v3_block_grid_validate_identity( const v3_world* world, const v
 														  new_entry_count );
 }
 
-v3_status v3_world_attach_block_grid_internal( v3_world* world, const v3_body_definition* body, v3_cooked_grid* grid,
+v3_status v3_world_attach_block_grid_internal( v3_world* world, const v3_body_definition* body, const v3_cooked_grid* grid,
 											   const v3_mass_properties* mass_override, v3_body_handle* out )
 {
 	if ( grid->data == NULL )
@@ -451,7 +451,7 @@ v3_status v3_world_attach_block_grid_internal( v3_world* world, const v3_body_de
 	return V3_OK;
 }
 
-v3_status v3_world_replace_block_grid_internal( v3_world* world, const v3_body_handle* body, v3_cooked_grid* grid )
+v3_status v3_world_replace_block_grid_internal( v3_world* world, const v3_body_handle* body, const v3_cooked_grid* grid )
 {
 	if ( body->logical_id == 0 || body->generation == 0 || body->generation > INT32_MAX || body->reserved != 0 )
 	{

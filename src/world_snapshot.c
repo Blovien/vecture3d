@@ -1586,7 +1586,7 @@ static bool b3MovedProxyStateIsValid( const b3BroadPhase* broadPhase )
 	int bitCount = 0;
 	for ( int type = 0; type < b3_bodyTypeCount; ++type )
 	{
-		bitCount += b3CountSetBits( (b3BitSet*)( broadPhase->movedProxies + type ) );
+		bitCount += b3CountSetBits( broadPhase->movedProxies + type );
 	}
 	if ( bitCount != broadPhase->moveArray.count )
 	{

@@ -53,7 +53,7 @@ static bool v3BlockGridIsValidAABB( b3AABB bounds, bool allowDegenerate )
 
 static bool v3BlockGridIsValidScratch( const v3BlockGridData* grid, const v3BlockGridQueryScratch* scratch )
 {
-	int wordCount = v3BlockGrid_GetQueryScratchWordCount( grid );
+	const int wordCount = v3BlockGrid_GetQueryScratchWordCount( grid );
 	return scratch != NULL && scratch->visitedHitboxes != NULL && scratch->visitedWordCapacity >= wordCount;
 }
 

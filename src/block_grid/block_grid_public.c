@@ -311,7 +311,7 @@ static float v3PublicClosestCastCallback( b3ShapeId shapeId, b3Pos point, b3Vec3
 		return 1.0f;
 	}
 
-	b3Shape* shape = b3Array_Get( cast->world->shapes, shapeId.index1 - 1 );
+	const b3Shape* shape = b3Array_Get( cast->world->shapes, shapeId.index1 - 1 );
 	v3ClosestCastResult candidate = {
 		.bodyId = b3MakeBodyId( cast->world, shape->bodyId ),
 		.shapeId = shapeId,

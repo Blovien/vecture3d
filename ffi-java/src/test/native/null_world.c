@@ -28,7 +28,7 @@ v3_status v3_world_set_limits( v3_world* world, const v3_world_limits* limits )
 	return V3_INVALID_ARGUMENT;
 }
 
-v3_status v3_world_get_limits( v3_world* world, v3_world_limits* limits )
+v3_status v3_world_get_limits( const v3_world* world, v3_world_limits* limits )
 {
 	(void)world;
 	(void)limits;
@@ -62,7 +62,7 @@ uint32_t v3_active_world_count( void )
 	return 0;
 }
 
-v3_status v3_world_replace_block_grid( v3_world* world, const v3_body_handle* body, v3_cooked_grid* grid )
+v3_status v3_world_replace_block_grid( v3_world* world, const v3_body_handle* body, const v3_cooked_grid* grid )
 {
 	(void)world;
 	(void)body;

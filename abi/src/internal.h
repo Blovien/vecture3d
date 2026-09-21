@@ -133,9 +133,9 @@ v3_status v3_geometry_reserve_body_state_internal( v3_world* world, uint32_t act
 void v3_geometry_publish_body_internal( v3_world* world, const v3_body_entry* entry );
 v3_status v3_cook_block_grid_internal( const v3_block_material* materials, uint32_t material_count, const v3_block_cell* cells,
 									   uint32_t cell_count, const v3_block_box* boxes, uint32_t box_count, v3_cooked_grid** out );
-v3_status v3_world_attach_block_grid_internal( v3_world* world, const v3_body_definition* body, v3_cooked_grid* grid,
+v3_status v3_world_attach_block_grid_internal( v3_world* world, const v3_body_definition* body, const v3_cooked_grid* grid,
 											   const v3_mass_properties* mass_override, v3_body_handle* out );
-v3_status v3_world_replace_block_grid_internal( v3_world* world, const v3_body_handle* body, v3_cooked_grid* grid );
+v3_status v3_world_replace_block_grid_internal( v3_world* world, const v3_body_handle* body, const v3_cooked_grid* grid );
 void v3_destroy_cooked_grid_internal( v3_cooked_grid* grid );
 v3_status v3_world_replace_distance_joints_internal( v3_world* world, const v3_joint_handle* removals, uint32_t removal_count,
 													 const v3_distance_joint_command* creations, uint32_t creation_count );
