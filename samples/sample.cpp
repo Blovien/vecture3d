@@ -442,6 +442,8 @@ void Sample::Step()
 	b3World_EnableSleeping( m_worldId, m_context->enableSleep );
 	b3World_EnableWarmStarting( m_worldId, m_context->enableWarmStarting );
 	b3World_EnableContinuous( m_worldId, m_context->enableContinuous );
+	b3World_SetRestitutionIterations( m_worldId, m_context->restitutionIterations );
+	b3World_EnableRestitutionPropagation( m_worldId, m_context->enableRestitutionPropagation );
 
 	if ( timeStep > 0.0f || m_stepWhilePaused )
 	{
@@ -538,9 +540,33 @@ b3BodyId Sample::FocusBody() const
 
 void Sample::FocusHome()
 {
-	b3AABB aabb = b3World_GetBounds( m_worldId );
-	float aspect = m_camera->m_height > 0 ? (float)m_camera->m_width / (float)m_camera->m_height : 1.0f;
-	m_camera->Frame( aabb, aspect, 0.75f );
+	m_camera->m_pivot = m_context->homePivot;
+	m_camera->SetOrbit( m_context->homeYaw, m_context->homePitch, m_context->homeRadius );
+}
+
+void FrameSelection( SampleContext* context )
+{
+	// A non-body selection such as a recorded query supplies its own bounds and takes priority over
+	// the hovered body. With nothing selected the sample decides what home is. The replay viewer fits
+	// its recording, which lives in a player-owned world rather than the base world.
+	Sample* sample = context->sample;
+	Camera& cam = context->camera;
+	float aspect = cam.m_height > 0 ? (float)cam.m_width / (float)cam.m_height : 1.0f;
+	b3AABB bounds;
+	if ( sample->FocusBounds( &bounds ) )
+	{
+		cam.Frame( bounds, aspect, 1.5f );
+		return;
+	}
+
+	b3BodyId bodyId = sample->FocusBody();
+	if ( B3_IS_NON_NULL( bodyId ) )
+	{
+		cam.Frame( b3Body_ComputeAABB( bodyId ), aspect, 1.5f );
+		return;
+	}
+
+	sample->FocusHome();
 }
 
 void Sample::ResetProfile()
@@ -621,7 +647,7 @@ void Sample::DrawMetrics()
 		int count = m_profileWriteIndex - m_profileReadIndex;
 
 		// Unroll ring buffer into per-field histories.
-		constexpr int kRowCount = 21;
+		constexpr int kRowCount = 22;
 		float histories[kRowCount][m_profileCapacity];
 		float totals[kRowCount] = {};
 		for ( int i = 0; i < count; ++i )
@@ -640,15 +666,16 @@ void Sample::DrawMetrics()
 			histories[9][i] = p.solveImpulses;
 			histories[10][i] = p.integratePositions;
 			histories[11][i] = p.relaxImpulses;
-			histories[12][i] = p.storeImpulses;
-			histories[13][i] = p.splitIslands;
-			histories[14][i] = p.transforms;
-			histories[15][i] = p.jointEvents;
-			histories[16][i] = p.hitEvents;
-			histories[17][i] = p.refit;
-			histories[18][i] = p.sleepIslands;
-			histories[19][i] = p.bullets;
-			histories[20][i] = p.sensors;
+			histories[12][i] = p.restitution;
+			histories[13][i] = p.storeImpulses;
+			histories[14][i] = p.splitIslands;
+			histories[15][i] = p.transforms;
+			histories[16][i] = p.jointEvents;
+			histories[17][i] = p.hitEvents;
+			histories[18][i] = p.refit;
+			histories[19][i] = p.sleepIslands;
+			histories[20][i] = p.bullets;
+			histories[21][i] = p.sensors;
 
 			totals[0] += p.step;
 			totals[1] += p.pairs;
@@ -662,15 +689,16 @@ void Sample::DrawMetrics()
 			totals[9] += p.solveImpulses;
 			totals[10] += p.integratePositions;
 			totals[11] += p.relaxImpulses;
-			totals[12] += p.storeImpulses;
-			totals[13] += p.splitIslands;
-			totals[14] += p.transforms;
-			totals[15] += p.jointEvents;
-			totals[16] += p.hitEvents;
-			totals[17] += p.refit;
-			totals[18] += p.sleepIslands;
-			totals[19] += p.bullets;
-			totals[20] += p.sensors;
+			totals[12] += p.restitution;
+			totals[13] += p.storeImpulses;
+			totals[14] += p.splitIslands;
+			totals[15] += p.transforms;
+			totals[16] += p.jointEvents;
+			totals[17] += p.hitEvents;
+			totals[18] += p.refit;
+			totals[19] += p.sleepIslands;
+			totals[20] += p.bullets;
+			totals[21] += p.sensors;
 		}
 
 		// Smoothed over the last few frames so bars don't jitter visibly.
@@ -730,7 +758,7 @@ void Sample::DrawMetrics()
 			{ "solve", 0, colorSolve },		   { "setup", 1, colorDefault },	  { "constraints", 1, colorDefault },
 			{ "prepare", 2, colorDefault },	   { "velocities", 2, colorDefault },	  { "warm start", 2, colorDefault },
 			{ "bias", 2, colorDefault },	   { "positions", 2, colorDefault },  { "relax", 2, colorDefault },
-			{ "store", 2, colorDefault },	   { "split islands", 2, colorDefault },
+			{ "restitution", 2, colorDefault }, { "store", 2, colorDefault },	  { "split islands", 2, colorDefault },
 			{ "transforms", 1, colorDefault }, { "joint events", 1, colorDefault }, { "hit events", 1, colorDefault },
 			{ "refit BVH", 1, colorDefault },  { "sleep", 1, colorDefault },	  { "bullets", 1, colorDefault },
 			{ "sensors", 0, colorSensors },
@@ -1354,6 +1382,15 @@ void SelectSample( SampleContext* context, int selection, bool restart )
 	context->restart = restart;
 	context->sample = g_sampleEntries[selection].CreateFcn( context );
 
+	// A restart keeps the camera where it was, so the original starting view stays home
+	if ( restart == false )
+	{
+		context->homePivot = context->camera.m_pivot;
+		context->homeYaw = context->camera.m_yaw;
+		context->homePitch = context->camera.m_pitch;
+		context->homeRadius = context->camera.m_radius;
+	}
+
 	// A sample that knows where its content sits relative to its camera says
 	// so, and is taken at its word. The ceiling below guards a guess, not a
 	// measurement, so capping an explicit request would only hide it.
@@ -1678,11 +1715,11 @@ static void DrawMenuBar( SampleContext* context )
 			ImGui::Separator();
 			if ( ImGui::MenuItem( "Previous Sample", "[" ) )
 			{
-				SelectSample( context, b3MaxInt( 0, context->sampleIndex - 1 ), false );
+				SelectSample( context, ( context->sampleIndex + g_sampleCount - 1 ) % g_sampleCount, false );
 			}
 			if ( ImGui::MenuItem( "Next Sample", "]" ) )
 			{
-				SelectSample( context, b3MinInt( g_sampleCount - 1, context->sampleIndex + 1 ), false );
+				SelectSample( context, ( context->sampleIndex + 1 ) % g_sampleCount, false );
 			}
 			ImGui::Separator();
 			if ( ImGui::MenuItem( "Reset Profile" ) )
@@ -1694,7 +1731,7 @@ static void DrawMenuBar( SampleContext* context )
 				b3World_DumpMemoryStats( context->sample->m_worldId );
 			}
 			ImGui::Separator();
-			if ( ImGui::MenuItem( "Quit", "Esc" ) )
+			if ( ImGui::MenuItem( "Quit", "Ctrl+Q" ) )
 			{
 				sapp_request_quit();
 			}
@@ -1707,12 +1744,13 @@ static void DrawMenuBar( SampleContext* context )
 			{
 				context->showUI = false;
 			}
-			if ( ImGui::MenuItem( "Frame Camera" ) )
+			if ( ImGui::MenuItem( "Frame Selection", "F" ) )
 			{
-				b3AABB aabb = b3World_GetBounds( context->sample->m_worldId );
-				Camera& cam = context->camera;
-				float aspect = cam.m_height > 0 ? (float)cam.m_width / (float)cam.m_height : 1.0f;
-				cam.Frame( aabb, aspect, 0.75f );
+				FrameSelection( context );
+			}
+			if ( ImGui::MenuItem( "Reset Camera", "Home" ) )
+			{
+				context->sample->FocusHome();
 			}
 			ImGui::MenuItem( "Shapes", nullptr, &gd->drawShapes );
 			if ( ImGui::BeginMenu( "Transparency" ) )
@@ -1844,7 +1882,8 @@ static void DrawMenuBar( SampleContext* context )
 					DrawRow( "R", "Restart sample" );
 					DrawRow( "[  ]", "Previous / next sample" );
 					DrawRow( "Ctrl+O", "Open sample picker" );
-					DrawRow( "F", "Frame selection / world" );
+					DrawRow( "F", "Frame selection" );
+					DrawRow( "Home", "Reset camera" );
 					DrawRow( "?", "Show / hide controls" );
 					DrawRow( "Esc", "Cancel / close" );
 					DrawRow( "Ctrl+Q", "Quit" );
@@ -2046,6 +2085,7 @@ static void DrawInfoPanel( SampleContext* context )
 	{
 		ImGui::PushItemWidth( 6.0f * fontSize );
 		ImGui::SliderInt( "Sub-steps##Solver", &context->subStepCount, 1, 50 );
+		ImGui::SliderInt( "Rest Iters##Solver", &context->restitutionIterations, 0, 8 );
 		ImGui::SliderFloat( "Hertz##Solver", &context->hertz, 5.0f, 240.0f, "%.0f hz" );
 
 		if ( ImGui::SliderInt( "Workers##Solver", &context->workerCount, 1, B3_MAX_WORKERS ) )
@@ -2065,6 +2105,7 @@ static void DrawInfoPanel( SampleContext* context )
 		ImGui::Checkbox( "Sleep##Solver", &context->enableSleep );
 		ImGui::Checkbox( "Warm Starting##Solver", &context->enableWarmStarting );
 		ImGui::Checkbox( "Continuous##Solver", &context->enableContinuous );
+		ImGui::Checkbox( "Rest Prop##Solver", &context->enableRestitutionPropagation );
 
 		if ( ImGui::Shortcut( ImGuiKey_R ) || ImGui::Button( "Restart" ) )
 		{

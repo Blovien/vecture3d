@@ -382,7 +382,7 @@ static bool b3ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 	B3_ASSERT( body->type == b3_staticBody || ( fastBodySim->flags & b3_isBullet ) );
 
 	// Skip bullets
-	if ( bodySim->flags & b3_isBullet )
+	if ( body->flags & b3_isBullet )
 	{
 		return true;
 	}
@@ -450,7 +450,6 @@ static bool b3ContinuousQueryCallback( int proxyId, uint64_t userData, void* con
 
 		if ( didHit )
 		{
-			fastBodySim->flags |= b3_hadTimeOfImpact;
 			continuousContext->fraction = output.fraction;
 			continuousContext->distanceIterations = b3MaxInt( continuousContext->distanceIterations, output.distanceIterations );
 			continuousContext->pushBackIterations = b3MaxInt( continuousContext->pushBackIterations, output.pushBackIterations );
@@ -564,6 +563,7 @@ static void b3SolveContinuous( b3World* world, int bodySimIndex, b3TaskContext* 
 		fastBodySim->center = center;
 		fastBodySim->rotation0 = q;
 		fastBodySim->center0 = center;
+		fastBodySim->flags |= b3_hadTimeOfImpact;
 
 		// Timeloss means there is a lost gravity contribution. Other forces and torques are ignored for now.
 		b3BodyState* fastBodyState = b3Array_Get( awakeSet->bodyStates, bodySimIndex );
@@ -1043,6 +1043,17 @@ static void b3ExecuteBlock( b3SolverStage* stage, b3StepContext* context, b3Solv
 			}
 			break;
 
+		case b3_stageRestitution:
+			if ( blockType == b3_graphWideContactBlock )
+			{
+				b3ApplyRestitution_Convex( block, context );
+			}
+			else if ( blockType == b3_graphContactBlock )
+			{
+				b3ApplyRestitution_Mesh( block, context );
+			}
+			break;
+
 		case b3_stageStoreWideImpulses:
 			b3StoreImpulses_Convex( block, context, workerIndex );
 			break;
@@ -1304,6 +1315,29 @@ static void b3SolverTask( void* taskContext )
 		// Advance the stage according to the sub-stepping tasks just completed
 		// integrate velocities / warm start / solve / integrate positions / relax
 		stageIndex += 1 + activeColorCount + ITERATIONS * activeColorCount + 1 + RELAX_ITERATIONS * activeColorCount;
+
+		int restitutionIterations = context->world->restitutionIterations;
+		if ( restitutionIterations > 0 && b3AtomicLoadInt( &context->anyRestitution ) != 0 )
+		{
+			for ( int j = 0; j < restitutionIterations; ++j )
+			{
+				b3ApplyRestitution_Overflow( context );
+
+				int iterationStageIndex = stageIndex;
+				for ( int colorIndex = 0; colorIndex < activeColorCount; ++colorIndex )
+				{
+					syncBits = ( graphSyncIndex << 16 ) | iterationStageIndex;
+					B3_ASSERT( stages[iterationStageIndex].type == b3_stageRestitution );
+					b3ExecuteMainStage( stages + iterationStageIndex, context, syncBits );
+					iterationStageIndex += 1;
+				}
+				graphSyncIndex += 1;
+			}
+
+			profile->restitution += b3GetMillisecondsAndReset( &ticks );
+		}
+
+		stageIndex += activeColorCount;
 
 		// Store impulses
 		b3StoreImpulses_Overflow( context );
@@ -1584,15 +1618,6 @@ void b3Solve( b3World* world, b3StepContext* stepContext )
 
 					int colorContactCountW = ( ( colorConvexContactCount - 1 ) >> B3_SIMD_SHIFT ) + 1;
 					color->wideConstraintCount = colorContactCountW;
-
-					// Zero remainder lanes in the tail wide slot so prepare workers don't need to
-					// initialize them.
-					if ( ( colorConvexContactCount & ( B3_SIMD_WIDTH - 1 ) ) != 0 )
-					{
-						memset( (uint8_t*)color->wideConstraints + ( colorContactCountW - 1 ) * wideContactByteCount, 0,
-								wideContactByteCount );
-					}
-
 					wideBase += colorContactCountW;
 				}
 
@@ -1663,6 +1688,8 @@ void b3Solve( b3World* world, b3StepContext* stepContext )
 		stageCount += 1;
 		// b3_stageRelax
 		stageCount += RELAX_ITERATIONS * activeColorCount;
+		// b3_stageRestitution
+		stageCount += activeColorCount;
 		// b3_stageStoreWideImpulses
 		stageCount += 1;
 		// b3_stageStoreImpulses
@@ -1745,6 +1772,8 @@ void b3Solve( b3World* world, b3StepContext* stepContext )
 								   activeColorIndices );
 		stage = b3InitStage( stage, b3_stageIntegratePositions, bodyBlocks, bodyDim.count, UINT8_MAX );
 		stage = b3InitColorStages( stage, b3_stageRelax, RELAX_ITERATIONS, activeColorCount, graphColorBlocks, graphBlockCounts,
+								   activeColorIndices );
+		stage = b3InitColorStages( stage, b3_stageRestitution, 1, activeColorCount, graphColorBlocks, graphBlockCounts,
 								   activeColorIndices );
 		stage = b3InitStage( stage, b3_stageStoreWideImpulses, convexBlocks, convexPrepareDim.count, UINT8_MAX );
 		stage = b3InitStage( stage, b3_stageStoreImpulses, meshBlocks, meshPrepareDim.count, UINT8_MAX );

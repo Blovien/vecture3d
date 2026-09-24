@@ -235,6 +235,8 @@ typedef struct b3World
 	b3Vec3 gravity;
 	float hitEventThreshold;
 	float restitutionThreshold;
+	int restitutionIterations;
+	bool enableRestitutionPropagation;
 	float maxLinearSpeed;
 	float contactSpeed;
 	float contactHertz;
@@ -300,6 +302,8 @@ b3World* b3GetWorldFromId( b3WorldId id );
 
 b3World* b3GetUnlockedWorld( int index );
 b3World* b3GetWorld( int index );
+
+void b3World_RebuildStaticTree( b3WorldId worldId );
 
 void b3ValidateConnectivity( b3World* world );
 void b3ValidateSolverSets( b3World* world );
