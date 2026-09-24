@@ -1,11 +1,16 @@
+<div align="center">
+
 # Vecture3D
+
+#### A Box3D fork designed and optimized for the Hytale Server.
 
 [![Build Status](https://github.com/blovien/vecture3d/actions/workflows/build.yml/badge.svg)](https://github.com/blovien/vecture3d/actions)
 [![CLA assistant](https://cla-assistant.io/readme/badge/blovien/vecture3d)](https://cla-assistant.io/blovien/vecture3d)
 
-![Box3D Logo](https://box2d.org/images/logo.svg)
+<img width="100%" alt="Vecture3D" src="https://github.com/user-attachments/assets/b6f395d9-5218-4329-afea-1d85fa570e33" />
 
-Vecture3D is a fork of Box3D physics engine designed and optimized for the Hytale Server.
+</div>
+
 
 ## Source layout
 
